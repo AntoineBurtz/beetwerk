@@ -1,0 +1,18 @@
+services:
+  beetwerk:
+    # Fertiges Image aus GitHub. Zum lokalen Bauen stattdessen "build: ." eintragen.
+    image: ghcr.io/antoineburtz/beetwerk:latest
+    container_name: beetwerk
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      TZ: Europe/Berlin
+      # Benutzer, dem der Datenordner gehört (Unraid: 99 und 100)
+      PUID: "1000"
+      PGID: "1000"
+      # Optionaler Passwortschutz (HTTP Basic Auth). Leer lassen = kein Schutz.
+      BEETWERK_USER: garten
+      BEETWERK_PASSWORD: ""

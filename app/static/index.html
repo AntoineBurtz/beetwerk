@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#fbfcf9">
+  <title>Beetwerk</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#karte" aria-label="Beetwerk, zur Karte">
+      <svg viewBox="0 0 28 28" width="26" height="26" aria-hidden="true">
+        <rect x="2" y="4" width="24" height="6" rx="1.5" fill="#9c7b5b"/>
+        <rect x="2" y="13" width="15" height="6" rx="1.5" fill="#2d6a4f"/>
+        <rect x="19" y="13" width="7" height="6" rx="1.5" fill="#9c7b5b"/>
+        <rect x="2" y="22" width="24" height="3" rx="1.5" fill="#f2c200"/>
+      </svg>
+      <span>Beetwerk</span>
+    </a>
+    <nav class="tabs" aria-label="Ansichten">
+      <a href="#karte" data-view="karte">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4h14v12H3z M3 9h14 M10 4v12"/></svg>
+        <span>Karte</span>
+      </a>
+      <a href="#zeitleiste" data-view="zeitleiste">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h8 M7 10h10 M3 15h6"/></svg>
+        <span>Zeitleiste</span>
+      </a>
+      <a href="#saetze" data-view="saetze">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h12 M4 10h12 M4 15h12"/></svg>
+        <span>Sätze</span>
+      </a>
+      <a href="#kulturen" data-view="kulturen">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 17V8 M10 8c0-3 2-5 6-5 0 4-2 6-6 6 M10 11c0-2-2-4-6-4 0 3 2 5 6 5"/></svg>
+        <span>Kulturen</span>
+      </a>
+    </nav>
+    <div class="daypicker" id="daypicker"></div>
+    <button class="icon-btn settings-btn" id="settings-btn" type="button" aria-label="Einstellungen" title="Einstellungen">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h7 M14 6h3 M3 14h3 M10 14h7"/><circle cx="12" cy="6" r="2"/><circle cx="8" cy="14" r="2"/></svg>
+    </button>
+  </header>
+
+  <main id="view" class="view" tabindex="-1"></main>
+
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

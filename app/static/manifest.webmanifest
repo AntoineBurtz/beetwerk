@@ -1,0 +1,9 @@
+{
+  "name": "Beetwerk",
+  "short_name": "Beetwerk",
+  "start_url": "./#karte",
+  "display": "standalone",
+  "background_color": "#eef1ea",
+  "theme_color": "#fbfcf9",
+  "icons": [{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
