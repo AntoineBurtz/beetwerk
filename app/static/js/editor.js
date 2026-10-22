@@ -4,7 +4,8 @@ import {
   h, dayNum, isoOf, datesFromCrop, rowCount, plantCount, spanOf, fmtNum, KIND_LABEL, PLANTABLE,
   phases, rectOf, round2, clamp, plural,
 } from "./util.js";
-import { toast, confirmDialog } from "./ui.js";
+import { toast, confirmDialog, icon } from "./ui.js";
+import { openGeoSetup } from "./geosetup.js";
 
 function shell(title, { onSubmit, extraHead } = {}) {
   const dlg = h("dialog");
@@ -474,11 +475,13 @@ export function openSettings() {
     onSubmit: async () => {
       const payload = {
         garden_name: name.value.trim() || "Mein Garten",
-        garden_width: num(width.value),
-        garden_height: num(height.value),
         rotation_years: Math.round(num(years.value) ?? 3),
       };
-      if (!(payload.garden_width > 0) || !(payload.garden_height > 0)) throw new Error("Breite und Höhe müssen größer als 0 sein");
+      if (!geo) {
+        payload.garden_width = num(width.value);
+        payload.garden_height = num(height.value);
+        if (!(payload.garden_width > 0) || !(payload.garden_height > 0)) throw new Error("Breite und Höhe müssen größer als 0 sein");
+      }
       state.settings = await api.patch("/api/settings", payload);
       emit("data");
       toast("Einstellungen gespeichert");
@@ -498,6 +501,51 @@ export function openSettings() {
     } catch (e) { ui.showError(e.message); }
   });
 
+  const geo = state.geo;
+  const sourceLabel = () => {
+    if (!geo) return "";
+    if (geo.source === "custom") return "eigene Quelle";
+    return state.imagery?.sources?.find((x) => x.id === geo.source)?.label ?? geo.source;
+  };
+  const reloadImage = async (btn) => {
+    btn.disabled = true;
+    btn.textContent = "Luftbild wird geladen …";
+    try {
+      replaceAll(await api.post("/api/garden/image", { source: geo.source }));
+      ui.dlg.close();
+      toast("Luftbild neu geladen");
+    } catch (e) {
+      ui.showError(e.message);
+      btn.disabled = false;
+      btn.textContent = "Luftbild neu laden";
+    }
+  };
+  const removeGeo = async () => {
+    if (!(await confirmDialog("Grenze und gespeichertes Luftbild werden entfernt. Deine Beete bleiben, wo sie sind.", { ok: "Entfernen", title: "Grenze entfernen?" }))) return;
+    try {
+      replaceAll(await api.del("/api/garden/geo"));
+      ui.dlg.close();
+      toast("Grenze entfernt");
+    } catch (e) { ui.showError(e.message); }
+  };
+  const groundSection = geo
+    ? h("fieldset", {},
+      h("legend", {}, "Grundstück"),
+      h("p", { class: "muted small", style: { margin: 0 } },
+        `Auf dem Luftbild festgelegt: ${fmtNum(geo.width)} × ${fmtNum(geo.height)} m, ${fmtNum(geo.area, 0)} m². `,
+        geo.image ? `Luftbild: ${sourceLabel()}, geladen am ${new Date(geo.image.fetched_at * 1000).toLocaleDateString("de-DE")}.`
+          : geo.image_missing ? "Das gespeicherte Luftbild fehlt." : "Kein Luftbild gespeichert."),
+      h("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap" } },
+        h("button", { type: "button", class: "btn", onclick: () => { ui.dlg.close(); openGeoSetup(); } }, icon("parcel"), "Grenze bearbeiten"),
+        geo.source && state.imagery?.sources?.find((x) => x.id === geo.source)?.snapshot !== false
+          ? h("button", { type: "button", class: "btn", onclick: (e) => reloadImage(e.currentTarget) }, "Luftbild neu laden") : null,
+        h("button", { type: "button", class: "btn btn-danger", onclick: removeGeo }, "Grenze entfernen")))
+    : h("fieldset", {},
+      h("legend", {}, "Grundstück"),
+      h("div", { class: "grid-2" }, field("Breite (m)", width), field("Tiefe (m)", height)),
+      h("div", {}, h("button", { type: "button", class: "btn", onclick: () => { ui.dlg.close(); openGeoSetup(); } },
+        icon("parcel"), "Stattdessen auf dem Luftbild festlegen")));
+
   const loadDemo = async () => {
     const hasBeds = state.beds.length > 0;
     if (hasBeds && !(await confirmDialog("Alle Beete und Sätze werden durch den Beispielgarten ersetzt. Die Kulturliste bleibt.", { ok: "Ersetzen", title: "Beispielgarten laden?" }))) return;
@@ -510,9 +558,7 @@ export function openSettings() {
 
   ui.body.append(
     field("Name des Gartens", name),
-    h("fieldset", {},
-      h("legend", {}, "Grundstück"),
-      h("div", { class: "grid-2" }, field("Breite (m)", width), field("Tiefe (m)", height))),
+    groundSection,
     field("Anbaupause für die Fruchtfolge (Jahre)", years,
       "Gleiche Pflanzenfamilie an gleicher Stelle innerhalb dieser Zeit wird markiert. 0 schaltet die Prüfung ab."),
     h("fieldset", {},

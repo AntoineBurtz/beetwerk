@@ -145,6 +145,7 @@ h3 { font-size: 15px; }
 .btn-danger { color: var(--alert); border-color: transparent; background: transparent; }
 .btn-danger:hover { background: var(--alert-soft); }
 .btn-sm { min-height: 30px; padding: 0 10px; font-size: 14px; }
+.btn:disabled, .btn[disabled] { opacity: .45; cursor: not-allowed; }
 .btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 
 .field { display: grid; gap: 4px; }
@@ -204,7 +205,7 @@ h3 { font-size: 15px; }
 .map-svg .ruler text { font-family: var(--font-cond); font-weight: 500; fill: var(--ink-3); }
 .map-svg .bed { cursor: move; }
 .map-svg .bed-body { stroke-width: 2; }
-.map-svg .bed-name { font-family: var(--font-cond); font-weight: 600; fill: var(--ink); pointer-events: none; }
+.map-svg .bed-name { font-family: var(--font-cond); font-weight: 600; fill: var(--ink); pointer-events: none; paint-order: stroke; stroke: rgba(251, 252, 249, .8); stroke-linejoin: round; }
 .map-svg .bed-size { font-weight: 500; fill: var(--ink-3); }
 .map-svg .planting { cursor: move; }
 .map-svg .pl-label { font-family: var(--font-cond); font-weight: 600; pointer-events: none; paint-order: stroke; stroke: rgba(251, 252, 249, .85); stroke-width: 4px; stroke-linejoin: round; fill: var(--ink); }
@@ -242,6 +243,7 @@ h3 { font-size: 15px; }
   padding: 22px 24px; max-width: 360px; display: grid; gap: 12px;
 }
 .map-empty .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.map-empty.low { align-items: end; padding-bottom: 16px; }
 
 /* Zeitregler unter der Karte */
 .scrubber {
@@ -561,4 +563,89 @@ legend { font-weight: 600; font-size: 15px; padding: 0; margin-bottom: 2px; }
   .stack-sm .seg label { flex: 1; justify-content: center; }
   .page-inner { padding: 14px 12px 32px; gap: 22px; }
   .page-head h1 { font-size: 22px; }
+}
+
+/* ------------------------------------------------------------- Grundstück auf dem Luftbild */
+
+body.geo-open { overflow: hidden; }
+.geo-setup {
+  position: fixed; inset: 0; z-index: 150;
+  display: grid; grid-template-rows: auto minmax(0, 1fr);
+  background: var(--surface);
+}
+.geo-head {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line);
+}
+.geo-head h2 { font-size: 19px; margin-right: 8px; }
+.geo-search { position: relative; display: flex; gap: 6px; flex: 1 1 320px; max-width: 520px; }
+.geo-search .input { flex: 1; }
+.geo-source { width: auto; max-width: 280px; }
+.geo-head .icon-btn { margin-left: auto; }
+.geo-results {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 1000;
+  margin: 0; padding: 4px; list-style: none;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-m); box-shadow: var(--shadow);
+  max-height: 320px; overflow-y: auto;
+}
+.geo-results li { font-size: 14px; }
+.geo-results li.muted { padding: 8px 10px; }
+.geo-results button { all: unset; display: block; padding: 8px 10px; border-radius: var(--r-s); cursor: pointer; line-height: 1.35; }
+.geo-results button:hover, .geo-results button:focus-visible { background: var(--surface-2); }
+
+.geo-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; min-height: 0; }
+.geo-map { min-height: 0; background: #d9ddd3; cursor: crosshair; }
+.geo-map.leaflet-container { font: 400 13px/1.4 var(--font); }
+.geo-panel {
+  border-left: 1px solid var(--line); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 16px; padding: 16px;
+}
+.geo-step { display: grid; gap: 8px; }
+.geo-step h3 { font-size: 15px; }
+.geo-step p { margin: 0; }
+.geo-figures strong { font-size: 18px; }
+.geo-indent { padding-left: 24px; }
+.geo-custom { display: grid; gap: 8px; padding: 12px; background: var(--surface-2); border-radius: var(--r-m); }
+.geo-custom p { margin: 0; }
+.geo-custom .btn { justify-self: start; }
+.geo-foot {
+  position: sticky; bottom: -16px; margin: auto -16px -16px; padding: 12px 16px;
+  display: flex; justify-content: flex-end; gap: 8px;
+  background: var(--surface); border-top: 1px solid var(--line);
+}
+.geo-source-line { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.geo-source-line span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+
+.geo-vertex { background: var(--signal); border: 2px solid var(--ink); border-radius: 50%; box-shadow: 0 0 0 2px rgba(255,255,255,.7); }
+.geo-vertex.first { background: #fff; border-width: 3px; }
+.leaflet-tooltip.geo-len {
+  background: rgba(29, 43, 36, .86); color: #fff; border: 0; border-radius: 3px; box-shadow: none;
+  padding: 1px 6px; font: 600 13px/1.4 var(--font-cond); white-space: nowrap;
+}
+.leaflet-tooltip.geo-len::before { display: none; }
+.leaflet-tooltip.geo-len.ref { background: #fff; color: var(--ink); }
+
+/* Luftbild auf der Beetkarte */
+.map-svg.sat .bed-body { fill-opacity: .42; }
+.map-svg.sat .planting > rect:first-child { fill-opacity: .78; }
+.map-attrib {
+  position: absolute; right: 6px; bottom: 6px; max-width: calc(100% - 12px);
+  font-size: 11px; color: var(--ink-2); background: rgba(251, 252, 249, .82);
+  padding: 1px 6px; border-radius: 3px; pointer-events: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.icon-btn[aria-pressed="true"] { background: var(--leaf-soft); color: var(--leaf); }
+.compass { display: grid; place-items: center; width: 36px; height: 36px; color: var(--ink-2); }
+.compass svg { width: 22px; height: 22px; transition: transform .2s; }
+@media (prefers-reduced-motion: reduce) { .compass svg { transition: none; } }
+
+@media (max-width: 760px) {
+  .geo-head { gap: 8px; padding: 8px 8px 8px 12px; }
+  .geo-head h2 { font-size: 17px; flex: 1; }
+  .geo-head .icon-btn { order: 1; margin-left: 0; }
+  .geo-search { order: 2; flex-basis: 100%; max-width: none; }
+  .geo-source { order: 3; max-width: none; width: 100%; }
+  .geo-body { grid-template-columns: 1fr; grid-template-rows: minmax(0, 60fr) minmax(0, 40fr); }
+  .geo-panel { border-left: 0; border-top: 1px solid var(--line); padding: 12px; gap: 12px; }
+  .geo-foot { bottom: -12px; margin: auto -12px -12px; padding: 10px 12px; }
 }

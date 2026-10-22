@@ -11,15 +11,17 @@ from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import db
+from . import db, geo
 from .seed import seed_demo
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+IMAGE_PATH = db.DATA_DIR / "imagery" / "garden.jpg"
+INTERNAL_SETTINGS = {"geo", "imagery_custom"}
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -124,6 +126,34 @@ class SettingsIn(BaseModel):
     rotation_years: Optional[int] = Field(None, ge=0, le=10)
 
 
+class CustomSource(BaseModel):
+    type: Literal["wms", "xyz"]
+    url: str = Field(min_length=8, max_length=500)
+    layers: str = Field("", max_length=200)
+    attribution: str = Field("", max_length=200)
+    max_zoom: int = Field(19, ge=10, le=22)
+
+
+class GeoIn(BaseModel):
+    boundary: list[tuple[float, float]] = Field(min_length=3, max_length=200)
+    bearing: float
+    source: str = "bayern-dop20"
+    custom: Optional[CustomSource] = None
+
+    @field_validator("boundary")
+    @classmethod
+    def _coords(cls, v):
+        for lat, lon in v:
+            if not (-85 <= lat <= 85 and -180 <= lon <= 180):
+                raise ValueError("Koordinaten außerhalb des gültigen Bereichs")
+        return v
+
+
+class ImageIn(BaseModel):
+    source: str = "bayern-dop20"
+    custom: Optional[CustomSource] = None
+
+
 BED_DEFAULTS = dict(name="Neues Beet", kind="bed", x=1.0, y=1.0, length=4.0, width=1.2, rotation=0.0, sort=0, notes="")
 CROP_DEFAULTS = dict(name="Neue Kultur", family="", color="#6a9b3c", method="direct", nursery_days=0,
                      field_days=60, harvest_days=21, row_spacing=30, plant_spacing=30, notes="")
@@ -192,11 +222,48 @@ def health():
     return {"ok": True, "version": VERSION}
 
 
+def _settings(conn) -> dict:
+    return {r["key"]: r["value"] for r in db.rows(conn, "SELECT key, value FROM settings")}
+
+
+def _set(conn, key: str, value: str) -> None:
+    conn.execute("INSERT INTO settings(key, value) VALUES (?, ?) "
+                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+
+
+def _geo_public(g: Optional[dict]) -> Optional[dict]:
+    """Grundstück für die Oberfläche: Luftbild mit Lage im aktuellen Koordinatensystem."""
+    if not g:
+        return None
+    out = {k: v for k, v in g.items() if k != "image"}
+    img = g.get("image")
+    out["image"] = None
+    out["image_missing"] = False
+    if img:
+        if IMAGE_PATH.exists():
+            f = geo.frame_from(g)
+            s_, w_, n_, e_ = img["bbox"]
+            e0, n0 = f.to_enu(s_, w_)
+            e1, n1 = f.to_enu(n_, e_)
+            out["image"] = {**img, "enu": [e0, n0, e1, n1], "url": f"/api/garden/image?v={img['fetched_at']}"}
+        else:
+            out["image_missing"] = True
+    return out
+
+
+def _imagery(raw: dict) -> dict:
+    sources = [{"id": k, **v} for k, v in geo.SOURCES.items()]
+    return {"sources": sources, "custom": geo.loads(raw.get("imagery_custom"))}
+
+
 @app.get("/api/data")
 def all_data():
     with db.session() as conn:
+        raw = _settings(conn)
         return {
-            "settings": {r["key"]: r["value"] for r in db.rows(conn, "SELECT key, value FROM settings")},
+            "settings": {k: v for k, v in raw.items() if k not in INTERNAL_SETTINGS},
+            "geo": _geo_public(geo.loads(raw.get("geo"))),
+            "imagery": _imagery(raw),
             "beds": db.rows(conn, "SELECT * FROM beds ORDER BY sort, name"),
             "crops": db.rows(conn, "SELECT * FROM crops ORDER BY name"),
             "plantings": db.rows(conn, "SELECT * FROM plantings ORDER BY sow_date, id"),
@@ -309,14 +376,17 @@ def delete_planting(planting_id: int):
 def update_settings(body: SettingsIn):
     with db.session() as conn:
         for key, value in body.model_dump(exclude_unset=True, exclude_none=True).items():
-            conn.execute("INSERT INTO settings(key, value) VALUES (?, ?) "
-                         "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, str(value)))
-        return {r["key"]: r["value"] for r in db.rows(conn, "SELECT key, value FROM settings")}
+            _set(conn, key, str(value))
+        return {k: v for k, v in _settings(conn).items() if k not in INTERNAL_SETTINGS}
 
 
 @app.get("/api/export")
 def export_all():
     data = all_data()
+    with db.session() as conn:
+        data["settings"] = _settings(conn)
+    data.pop("geo", None)
+    data.pop("imagery", None)
     data["format"] = "beetwerk"
     data["version"] = 1
     filename = f"beetwerk-{date.today().isoformat()}.json"
@@ -360,9 +430,89 @@ def load_demo(replace: bool = False):
             _err(409, "Es gibt schon Beete. Zum Ersetzen replace=true mitschicken.")
         conn.execute("DELETE FROM plantings")
         conn.execute("DELETE FROM beds")
-        conn.execute("UPDATE settings SET value = '16' WHERE key = 'garden_width'")
-        conn.execute("UPDATE settings SET value = '11' WHERE key = 'garden_height'")
+        if not geo.loads(_settings(conn).get("geo")):
+            _set(conn, "garden_width", "16")
+            _set(conn, "garden_height", "11")
         seed_demo(conn)
+    return all_data()
+
+
+# ---------------------------------------------------------------- Grundstück und Luftbild
+
+def _source_for(conn, source: str, custom: Optional[CustomSource]) -> dict:
+    if source == "custom":
+        if custom is not None:
+            _set(conn, "imagery_custom", geo.dumps(custom.model_dump()))
+        stored = geo.loads(_settings(conn).get("imagery_custom"))
+        return geo.resolve_source("custom", stored)
+    return geo.resolve_source(source, None)
+
+
+@app.put("/api/garden/geo")
+def set_garden_geo(body: GeoIn):
+    """Grenze speichern, Beete mitnehmen und Luftbild holen."""
+    try:
+        new = geo.build_geo([tuple(p) for p in body.boundary], body.bearing)
+        with db.session() as conn:
+            src = _source_for(conn, body.source, body.custom)
+            old = geo.loads(_settings(conn).get("geo"))
+    except geo.GeoError as exc:
+        _err(422, str(exc))
+    new["source"] = body.source
+
+    warning = None
+    if src.get("snapshot", True):
+        try:
+            new["image"] = geo.fetch_snapshot(new, src, IMAGE_PATH)
+        except geo.GeoError as exc:
+            warning = f"{exc}. Die Grenze ist gespeichert, das Luftbild kannst du später neu laden."
+    if "image" not in new and old and old.get("image"):
+        new["image"] = old["image"]  # altes Bild liegt geografisch weiter richtig
+
+    with db.session() as conn:
+        if old:
+            f_old, f_new = geo.frame_from(old), geo.frame_from(new)
+            for bed in db.rows(conn, "SELECT id, x, y, length, width, rotation FROM beds"):
+                _update(conn, "beds", bed["id"], geo.reanchor_bed(bed, f_old, f_new))
+        _set(conn, "geo", geo.dumps(new))
+        _set(conn, "garden_width", str(round(new["width"], 1)))
+        _set(conn, "garden_height", str(round(new["height"], 1)))
+    return {**all_data(), "warning": warning}
+
+
+@app.post("/api/garden/image")
+def refresh_garden_image(body: ImageIn):
+    with db.session() as conn:
+        g = geo.loads(_settings(conn).get("geo"))
+        if not g:
+            _err(409, "Zuerst die Grundstücksgrenze festlegen")
+        try:
+            src = _source_for(conn, body.source, body.custom)
+        except geo.GeoError as exc:
+            _err(422, str(exc))
+    try:
+        g["image"] = geo.fetch_snapshot(g, src, IMAGE_PATH)
+    except geo.GeoError as exc:
+        _err(502, str(exc))
+    g["source"] = body.source
+    with db.session() as conn:
+        _set(conn, "geo", geo.dumps(g))
+    return all_data()
+
+
+@app.get("/api/garden/image")
+def garden_image():
+    if not IMAGE_PATH.exists():
+        _err(404, "Kein Luftbild gespeichert")
+    return FileResponse(IMAGE_PATH, media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
+@app.delete("/api/garden/geo")
+def delete_garden_geo():
+    with db.session() as conn:
+        conn.execute("DELETE FROM settings WHERE key = 'geo'")
+    IMAGE_PATH.unlink(missing_ok=True)
     return all_data()
 
 

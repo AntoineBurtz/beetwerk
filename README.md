@@ -15,6 +15,27 @@ Dazu gibt es:
 - Bedarfsliste je Kultur und Sorte: Fläche, Reihenmeter, Pflanzen, vorzuziehende Jungpflanzen.
 - Kulturenliste mit 36 Gemüsen als Startwerte (Anzucht, Kulturdauer, Abstände, Familie), frei anpassbar.
 - Folgesätze mit einem Klick, Rückgängig (Strg+Z), JSON-Sicherung.
+- Grundstück auf dem Luftbild: Grenze einzeichnen, Beete liegen am echten Ort, Luftbild hinter den Beeten ein- und ausblenden.
+
+## Grundstück auf dem Luftbild
+
+Unter **Einstellungen → Grundstück** oder in der Seitenleiste der Karte: Adresse suchen, nah heranzoomen und die Ecken des Gartens der Reihe nach antippen. Die erste Ecke noch einmal antippen schließt die Grenze; danach lassen sich Ecken verschieben. Angezeigt werden Kantenlängen und Fläche.
+
+- **Ausrichtung:** Die Beetkarte wird so gedreht, dass eine Grundstückskante waagrecht liegt (Standard: die längste, eine andere Kante antippen zum Wechseln), oder mit Norden oben. Ein Nordpfeil auf der Karte zeigt die Himmelsrichtung.
+- **Luftbild:** Beim Übernehmen speichert der Server einen Ausschnitt rund um die Grenze in `data/imagery/`. Die Karte lädt danach nichts mehr aus dem Internet. Der Schalter mit dem Ebenen-Symbol blendet das Bild ein und aus. Unter Einstellungen lässt es sich neu laden, z. B. wenn neue Befliegungen erscheinen.
+- **Beete als Anker:** Wird die Grenze später neu gezeichnet oder anders ausgerichtet, bleiben alle Beete an ihrer Stelle im Garten. Beim Drehen eines Beets rastet der Winkel parallel oder rechtwinklig zu den Grundstückskanten ein (Umschalt hält das Einrasten an).
+
+**Quellen:**
+
+| Quelle | Gebiet | Bedingungen |
+|---|---|---|
+| Luftbild Bayern (DOP 20 cm), Farbe oder Colorinfrarot | Bayern | Open Data der Bayerischen Vermessungsverwaltung, CC BY 4.0. Die Quellenangabe steht auf der Karte. |
+| OpenStreetMap | weltweit | nur zum Zurechtfinden, wird nicht gespeichert |
+| Eigene Quelle (WMS oder XYZ-Kacheln) | frei wählbar | z. B. der Orthofoto-WMS eines anderen Bundeslands; die Nutzungsbedingungen der Quelle gelten |
+
+Google Maps ist nicht eingebaut: Es braucht einen API-Schlüssel mit hinterlegter Zahlung, und die Bilder dürfen nicht gespeichert werden.
+
+Die Adresssuche nutzt Nominatim (OpenStreetMap). Gesucht wird nur, wenn du auf „Suchen“ tippst; dabei geht der Suchbegriff an nominatim.openstreetmap.org. Luftbild-Kacheln lädt beim Einrichten der Browser direkt vom jeweiligen Dienst.
 
 ## Installation
 
@@ -81,6 +102,7 @@ BEETWERK_DATA=./data uvicorn app.main:app --host 0.0.0.0 --port 8000
 | Karte | Kultur aus der Seitenleiste auf ein Beet ziehen legt einen Satz an. Termine werden aus den Kulturdaten so berechnet, dass der Satz am Stichtag ins Beet kommt. |
 | Karte | Satz anklicken und ziehen verschiebt ihn im Beet, die vier Griffe ändern Länge und Breite. Pfeiltasten verschieben um 10 cm (mit Umschalt 1 m), Entf löscht, Eingabe öffnet den Dialog. |
 | Karte | Gestrichelte Flächen: Sätze, die in den nächsten drei Wochen ins Beet kommen. Jungpflanzen in Anzucht stehen in der Seitenleiste. |
+| Karte | Ebenen-Symbol links blendet das Luftbild ein oder aus. Darunter zeigt der Pfeil nach Norden. |
 | Zeitleiste | Balken waagerecht ziehen verschiebt alle Termine, senkrecht in eine andere Zeile wechselt das Beet. Rechte Kante ändert das Ernteende, linke Kante den Aussaattermin. |
 | Zeitleiste | Klick auf eine freie Stelle legt dort einen neuen Satz an. Klick in den Kopf setzt den Stichtag. |
 | Überall | `[` und `]` springen eine Woche zurück oder vor, Strg+Z macht die letzte Änderung rückgängig. |
@@ -118,9 +140,12 @@ Aufbau:
 - `app/main.py`: FastAPI-Server und REST-API
 - `app/db.py`: SQLite-Schema
 - `app/seed.py`: Kulturen und Beispielgarten
-- `app/static/`: Oberfläche ohne Build-Schritt, reines JavaScript mit ES-Modulen (`map.js` Beetkarte, `timeline.js` Zeitleiste, `plantings.js` Sätze und Aufgaben, `editor.js` Dialoge, `store.js` Zustand und Rückgängig)
+- `app/geo.py`: Koordinaten zwischen Grundstück und Erde, Luftbild-Abruf
+- `app/static/`: Oberfläche ohne Build-Schritt, reines JavaScript mit ES-Modulen (`map.js` Beetkarte, `timeline.js` Zeitleiste, `plantings.js` Sätze und Aufgaben, `editor.js` Dialoge, `geosetup.js` Grundstück auf dem Luftbild, `store.js` Zustand und Rückgängig)
 - `docker-entrypoint.py`: übergibt den Datenordner an PUID/PGID und startet ohne root
 - `unraid/beetwerk.xml`: Vorlage für Unraid
 - `.github/workflows/image.yml`: Tests und Image-Build
 
-Schrift: Barlow (SIL Open Font License), lokal eingebunden, damit alles ohne Internet läuft.
+Schrift: Barlow (SIL Open Font License) und Kartenbibliothek Leaflet 1.9.4 (BSD-2-Clause) sind lokal eingebunden, damit die Oberfläche ohne Internet läuft.
+
+Für Tests mit Luftbild gibt es einen kleinen Fake-Kartendienst: `python tests/fakemap.py 8790` liefert unter `http://127.0.0.1:8790/wms` (Layer beliebig) bzw. `/tiles/{z}/{x}/{y}.jpg` ein künstliches Grundstück bei 48,0° N / 11,0° O.

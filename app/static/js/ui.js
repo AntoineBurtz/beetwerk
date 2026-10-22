@@ -41,6 +41,8 @@ const ICONS = {
   trash: "M4 6h12 M8 6V4h4v2 M6 6l1 11h6l1-11",
   close: "M5 5l10 10 M15 5L5 15",
   rotate: "M15 6a6 6 0 1 0 1.5 5 M15 2v4h-4",
+  layers: "M10 3l7 4-7 4-7-4z M3 11l7 4 7-4",
+  parcel: "M4 6l7-3 6 5-2 9-10-2z",
 };
 
 export function icon(name) {
