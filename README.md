@@ -103,6 +103,8 @@ BEETWERK_DATA=./data uvicorn app.main:app --host 0.0.0.0 --port 8000
 | Karte | Satz anklicken und ziehen verschiebt ihn im Beet, die vier Griffe ändern Länge und Breite. Pfeiltasten verschieben um 10 cm (mit Umschalt 1 m), Entf löscht, Eingabe öffnet den Dialog. |
 | Karte | Gestrichelte Flächen: Sätze, die in den nächsten drei Wochen ins Beet kommen. Jungpflanzen in Anzucht stehen in der Seitenleiste. |
 | Karte | Ebenen-Symbol links blendet das Luftbild ein oder aus. Darunter zeigt der Pfeil nach Norden. |
+| Karte | **+** unten rechts: Art der Fläche wählen (Beet, Hochbeet, Gewächshaus, Weg, Sonstiges) und auf der Karte aufziehen; Antippen legt eine Fläche in Standardgröße an. Mehrere nacheinander möglich, „Fertig“ beendet. |
+| Karte | Sätze ohne Beet (z. B. aus der Zeitleiste ohne Beet angelegt) zeigt ein Hinweis oben rechts. In der Seitenleiste lassen sie sich auf ein Beet ziehen oder antippen und dann aufs Beet tippen. |
 | Zeitleiste | Balken waagerecht ziehen verschiebt alle Termine, senkrecht in eine andere Zeile wechselt das Beet. Rechte Kante ändert das Ernteende, linke Kante den Aussaattermin. |
 | Zeitleiste | Klick auf eine freie Stelle legt dort einen neuen Satz an. Klick in den Kopf setzt den Stichtag. |
 | Überall | `[` und `]` springen eine Woche zurück oder vor, Strg+Z macht die letzte Änderung rückgängig. |

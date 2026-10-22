@@ -1,10 +1,12 @@
 // Beetkarte: Grundstück mit Beeten, darauf die Sätze, die am Stichtag im Beet stehen.
-import { state, find, select, patch, remove, setDay, setPlacing, issuesOf, api, replaceAll } from "./store.js";
+import { state, find, select, patch, remove, setDay, setMode, issuesOf, api, replaceAll } from "./store.js";
 import {
   h, s, phases, onBedAt, rectOf, spanOf, rowCount, plantCount, spacing, mix, clamp, snap, round2,
   fmtDay, fmtNum, yearOf, yearStart, yearLength, MONTHS_SHORT, KIND_LABEL, PLANTABLE, isoOf, plural,
 } from "./util.js";
-import { openPlantingEditor, openBedEditor, createBedAt, placeCrop, createSuccession } from "./editor.js";
+import {
+  openPlantingEditor, openBedEditor, createBedRect, placeCrop, createSuccession, assignPlanting, DEFAULT_BED_SIZE,
+} from "./editor.js";
 import { iconBtn, icon, toast, confirmDialog } from "./ui.js";
 import { openGeoSetup } from "./geosetup.js";
 
@@ -42,7 +44,32 @@ export function mountMap(root) {
   const hint = h("div", { class: "map-hint", hidden: true });
   const empty = h("div", { class: "map-empty", hidden: true });
   const attrib = h("div", { class: "map-attrib", hidden: true });
-  const stage = h("div", { style: { position: "relative", minHeight: "0" } }, svg, tools, hint, empty, attrib);
+  const fabMenu = h("div", { class: "fab-menu", role: "menu", hidden: true, "aria-label": "Neue Fläche" },
+    Object.entries(KIND_LABEL).map(([k, label]) => h("button", {
+      type: "button", role: "menuitem", class: `fab-item kind-${k}`,
+      onclick: () => { closeFab(); setMode({ type: "bed", kind: k }); },
+    }, h("span", { class: "swatch", "aria-hidden": "true" }), label)));
+  const fab = h("button", { type: "button", class: "fab", "aria-label": "Neue Fläche anlegen", title: "Neue Fläche anlegen",
+    "aria-haspopup": "menu", "aria-expanded": "false", onclick: () => (fabMenu.hidden ? openFab() : closeFab()) }, icon("plus"));
+  const orphanPill = h("button", { type: "button", class: "orphan-pill", hidden: true, onclick: showOrphans });
+  const stage = h("div", { style: { position: "relative", minHeight: "0" } }, svg, tools, hint, empty, attrib, orphanPill, fabMenu, fab);
+
+  function openFab() {
+    fabMenu.hidden = false;
+    fab.setAttribute("aria-expanded", "true");
+    fabMenu.querySelector("button")?.focus();
+  }
+  function closeFab() {
+    fabMenu.hidden = true;
+    fab.setAttribute("aria-expanded", "false");
+  }
+  function onDocPointer(e) {
+    if (!fabMenu.hidden && !fabMenu.contains(e.target) && !fab.contains(e.target)) closeFab();
+  }
+  document.addEventListener("pointerdown", onDocPointer, true);
+  fabMenu.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.stopPropagation(); closeFab(); fab.focus(); }
+  });
   const scrub = buildScrubber();
   const panel = h("aside", { class: "panel", "aria-label": "Details" });
   const el = h("div", { class: "mapview" }, h("div", { class: "map-area" }, stage, scrub.el), panel);
@@ -156,7 +183,10 @@ export function mountMap(root) {
   function renderSvg() {
     if (!view) return;
     applyView();
-    svg.classList.toggle("placing", !!state.placing);
+    const mode = state.mode;
+    svg.classList.toggle("placing", mode?.type === "crop" || mode?.type === "planting");
+    svg.classList.toggle("drawing", mode?.type === "bed");
+    fab.classList.toggle("active", mode?.type === "bed");
     const k = upp();
     const { W, H } = gardenSize();
     const groundLayer = ground(W, H);
@@ -175,17 +205,60 @@ export function mountMap(root) {
 
     svg.replaceChildren(defs(), groundLayer, ruler, bedLayer, overLayer);
 
-    empty.hidden = state.beds.length > 0 || !state.loaded;
+    empty.hidden = state.beds.length > 0 || !state.loaded || state.mode?.type === "bed";
     empty.classList.toggle("low", !!state.geo);
     if (!empty.hidden && !empty.firstChild) renderEmpty();
-    if (state.placing) {
-      const crop = find.crop(state.placing);
-      hint.hidden = false;
-      hint.replaceChildren(h("span", {}, `Tippe auf ein Beet, um ${crop?.name ?? "die Kultur"} zu setzen`),
-        h("button", { type: "button", class: "btn btn-sm", onclick: () => setPlacing(null) }, "Abbrechen"));
-    } else {
-      hint.hidden = true;
+    renderHint();
+    renderOrphanPill();
+  }
+
+  function renderHint() {
+    const mode = state.mode;
+    if (!mode) { hint.hidden = true; return; }
+    hint.hidden = false;
+    if (mode.type === "bed") {
+      const label = KIND_LABEL[mode.kind];
+      hint.replaceChildren(
+        h("span", {}, `${label}: auf der Karte aufziehen, oder tippen für Standardgröße`),
+        h("button", { type: "button", class: "btn btn-sm", onclick: () => setMode(null) }, "Fertig"));
+      return;
     }
+    let what = "die Kultur";
+    if (mode.type === "crop") what = find.crop(mode.id)?.name ?? what;
+    else {
+      const p = find.planting(mode.id);
+      what = p ? `${find.crop(p.crop_id)?.name ?? "den Satz"}${p.variety ? " " + p.variety : ""}` : "den Satz";
+    }
+    hint.replaceChildren(h("span", {}, `Tippe auf ein Beet, um ${what} zu setzen`),
+      h("button", { type: "button", class: "btn btn-sm", onclick: () => setMode(null) }, "Abbrechen"));
+  }
+
+  // Sätze ohne Beet, die am Stichtag noch nicht vorbei sind
+  function orphans() {
+    return state.plantings
+      .filter((p) => {
+        const b = p.bed_id == null ? null : find.bed(p.bed_id);
+        return (!b || !PLANTABLE.has(b.kind)) && phases(p).he >= state.day;
+      })
+      .sort((a, b) => phases(a).sow - phases(b).sow);
+  }
+
+  function renderOrphanPill() {
+    const n = orphans().length;
+    orphanPill.hidden = n === 0 || state.mode?.type === "planting";
+    orphanPill.replaceChildren(h("span", { class: "count" }, n), n === 1 ? "Satz ohne Beet" : "Sätze ohne Beet");
+  }
+
+  function showOrphans() {
+    if (state.sel) select(null);
+    requestAnimationFrame(() => {
+      const sec = panel.querySelector(".orphans");
+      if (!sec) return;
+      sec.scrollIntoView({ block: "start", behavior: "smooth" });
+      sec.classList.remove("flash");
+      void sec.offsetWidth;
+      sec.classList.add("flash");
+    });
   }
 
   // Grundstück: Rechteck, oder die gezeichnete Grenze mit Luftbild dahinter
@@ -252,7 +325,7 @@ export function mountMap(root) {
         "Lege dein erstes Beet an und ziehe es an die richtige Stelle. Größe und Lage stellst du direkt auf der Karte ein."),
       h("div", { class: "row" },
         state.geo ? null : h("button", { type: "button", class: "btn btn-primary", onclick: openGeoSetup }, icon("parcel"), "Grundstück auf dem Luftbild festlegen"),
-        h("button", { type: "button", class: state.geo ? "btn btn-primary" : "btn", onclick: () => addBed("bed") }, "Beet anlegen"),
+        h("button", { type: "button", class: state.geo ? "btn btn-primary" : "btn", onclick: () => setMode({ type: "bed", kind: "bed" }) }, "Beet anlegen"),
         h("button", {
           type: "button", class: "btn", onclick: async () => {
             try { replaceAll(await api.post("/api/demo")); fit(); render(); toast("Beispielgarten geladen"); }
@@ -497,7 +570,11 @@ export function mountMap(root) {
     const bedEl = e.target.closest("[data-bed]");
     const base = { x0: e.clientX, y0: e.clientY, moved: false, pointerType: e.pointerType };
 
-    if (state.placing && bedEl) {
+    if (state.mode?.type === "bed") {
+      gesture = { ...base, type: "draw", kind: state.mode.kind, w0: toWorld(e) };
+      return;
+    }
+    if ((state.mode?.type === "crop" || state.mode?.type === "planting") && bedEl) {
       gesture = { ...base, type: "place", bedId: Number(bedEl.dataset.bed), inv: bedEl.getScreenCTM().inverse() };
       return;
     }
@@ -561,6 +638,11 @@ export function mountMap(root) {
     }
 
     switch (gesture.type) {
+      case "draw": {
+        const r = drawRect(gesture.w0, toWorld(e));
+        showDraft(r);
+        break;
+      }
       case "pan": {
         const k = upp();
         view = { ...gesture.view0, x: gesture.view0.x - dxPx * k, y: gesture.view0.y - dyPx * k };
@@ -652,13 +734,19 @@ export function mountMap(root) {
       if (g.type === "place") {
         const bed = find.bed(g.bedId);
         const l = toLocal(e, g.inv);
-        const cropId = state.placing;
-        setPlacing(null);
-        await placeCrop(cropId, bed, { x: l.x / U, y: l.y / U });
+        const mode = state.mode;
+        setMode(null);
+        if (mode?.type === "crop") await placeCrop(mode.id, bed, { x: l.x / U, y: l.y / U });
+        else if (mode?.type === "planting") await assignPlanting(mode.id, bed, { x: l.x / U, y: l.y / U });
+        return;
+      }
+      if (g.type === "draw") {
+        const [len, wid] = DEFAULT_BED_SIZE[g.kind] || DEFAULT_BED_SIZE.bed;
+        await createBedRect(g.kind, round2(snap(g.w0.x / U - len / 2, 0.1)), round2(snap(g.w0.y / U - wid / 2, 0.1)), len, wid);
         return;
       }
       if (g.type === "pan") {
-        if (state.placing) setPlacing(null);
+        if (state.mode) setMode(null);
         else if (state.sel) select(null);
         return;
       }
@@ -674,6 +762,13 @@ export function mountMap(root) {
     }
 
     switch (g.type) {
+      case "draw": {
+        hideDraft();
+        const r = drawRect(g.w0, toWorld(e));
+        if (r.w < 0.2 || r.h < 0.2) { toast("Zu klein: mindestens 20 × 20 cm aufziehen"); break; }
+        await createBedRect(g.kind, r.x, r.y, r.w, r.h);
+        break;
+      }
       case "move-bed": {
         const bed = find.bed(g.id);
         await commit("beds", bed, g.orig, ["x", "y"], `${bed.name} verschoben`);
@@ -712,7 +807,33 @@ export function mountMap(root) {
     try { await patch(kind, item.id, changes, { undoLabel: label }); } catch { /* Meldung kam schon */ }
   }
 
+  // Rechteck zum Aufziehen neuer Flächen, auf 10 cm gerastet, in Metern
+  function drawRect(a, b) {
+    const x0 = snap(Math.min(a.x, b.x) / U, 0.1), x1 = snap(Math.max(a.x, b.x) / U, 0.1);
+    const y0 = snap(Math.min(a.y, b.y) / U, 0.1), y1 = snap(Math.max(a.y, b.y) / U, 0.1);
+    return { x: round2(x0), y: round2(y0), w: round2(x1 - x0), h: round2(y1 - y0) };
+  }
+
+  let draft = null;
+  function showDraft(r) {
+    const k = upp();
+    if (!draft) {
+      draft = s("g", { class: "draft", "pointer-events": "none" },
+        s("rect", { "vector-effect": "non-scaling-stroke" }), s("text", {}));
+    }
+    if (!draft.isConnected) svg.append(draft);
+    const [rect, text] = draft.children;
+    rect.setAttribute("x", r.x * U); rect.setAttribute("y", r.y * U);
+    rect.setAttribute("width", r.w * U); rect.setAttribute("height", r.h * U);
+    text.setAttribute("x", (r.x + r.w / 2) * U);
+    text.setAttribute("y", (r.y + r.h) * U + 16 * k);
+    text.setAttribute("style", `font-size:${12.5 * k}px; stroke-width:${3 * k}px`);
+    text.textContent = `${fmtNum(r.w)} × ${fmtNum(r.h)} m`;
+  }
+  function hideDraft() { draft?.remove(); }
+
   function revert(g) {
+    if (g?.type === "draw") { hideDraft(); return; }
     if (!g?.orig) return;
     const item = g.type.includes("bed") ? find.bed(g.id) : find.planting(g.id);
     if (item) Object.assign(item, g.orig);
@@ -785,11 +906,6 @@ export function mountMap(root) {
     }
   }
 
-  function addBed(kind) {
-    const c = view ? { x: (view.x + view.w / 2) / U, y: (view.y + view.h / 2) / U } : { x: 4, y: 3 };
-    createBedAt(kind, c.x, c.y);
-  }
-
   // ------------------------------------------------------------ Seitenleiste
 
   function renderPanel() {
@@ -832,6 +948,7 @@ export function mountMap(root) {
         h("span", { class: "when" }, when(p))));
     }));
 
+    const loose = orphans();
     const out = [section(
       h("div", { class: "panel-title" }, h("h2", {}, state.settings.garden_name || "Garten")),
       h("p", { class: "status-line", style: { margin: 0 } },
@@ -839,6 +956,12 @@ export function mountMap(root) {
           ? `${onBeds.length} ${onBeds.length === 1 ? "Satz steht" : "Sätze stehen"} am Stichtag im Beet, ${Math.round(occ * 100)} % der Anbaufläche sind belegt.`
           : "Lege zuerst Beete an."),
     )];
+    if (loose.length) {
+      out.push(h("section", { class: "panel-section orphans" },
+        h("h3", {}, loose.length === 1 ? "1 Satz ohne Beet" : `${loose.length} Sätze ohne Beet`),
+        h("p", { class: "muted small", style: { margin: 0 } }, "Ziehe einen Satz auf ein Beet, oder tippe ihn an und danach auf das Beet."),
+        h("div", { class: "orphan-list" }, loose.map(orphanChip))));
+    }
     if (nursery.length) {
       out.push(section(h("h3", {}, "In Anzucht"),
         h("p", { class: "muted small", style: { margin: 0 } }, "Diese Jungpflanzen stehen noch nicht im Beet und erscheinen nicht auf der Karte."),
@@ -847,8 +970,10 @@ export function mountMap(root) {
     if (soon.length) out.push(section(h("h3", {}, "Aussaat in den nächsten 14 Tagen"), list(soon, (p) => fmtDay(phases(p).sow))));
     out.push(cropSection(null));
     out.push(section(h("h3", {}, "Fläche anlegen"),
+      h("p", { class: "muted small", style: { margin: 0 } }, "Art wählen und auf der Karte aufziehen. Das geht auch über das + unten rechts."),
       h("div", { class: "actions" }, Object.entries(KIND_LABEL).map(([k, label]) =>
-        h("button", { type: "button", class: "btn btn-sm", onclick: () => addBed(k) }, label)))));
+        h("button", { type: "button", class: "btn btn-sm", "aria-pressed": state.mode?.type === "bed" && state.mode.kind === k ? "true" : "false",
+          onclick: () => setMode({ type: "bed", kind: k }) }, label)))));
     const g = state.geo;
     out.push(section(h("h3", {}, "Grundstück"),
       g ? h("p", { class: "muted small", style: { margin: 0 } },
@@ -877,21 +1002,19 @@ export function mountMap(root) {
       search, chips);
   }
 
-  function cropChip(crop, bed) {
-    const chip = h("button", { type: "button", class: "chip", "aria-pressed": state.placing === crop.id ? "true" : "false",
-      title: crop.family || null },
-      h("span", { class: "dot", style: { background: crop.color } }), crop.name);
+  // Element, das sich auf ein Beet ziehen oder antippen lässt
+  function draggable(el, { label, color, onTap, onDrop }) {
     let start = null;
     let ghost = null;
-    chip.addEventListener("pointerdown", (e) => {
+    el.addEventListener("pointerdown", (e) => {
       if (e.button > 0) return;
       start = { x: e.clientX, y: e.clientY };
-      chip.setPointerCapture(e.pointerId);
+      el.setPointerCapture(e.pointerId);
     });
-    chip.addEventListener("pointermove", (e) => {
+    el.addEventListener("pointermove", (e) => {
       if (!start) return;
       if (!ghost && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6) {
-        ghost = h("div", { class: "drag-ghost", style: { background: crop.color, color: textColor(crop.color) } }, crop.name);
+        ghost = h("div", { class: "drag-ghost", style: { background: color, color: textColor(color) } }, label);
         document.body.append(ghost);
       }
       if (ghost) { ghost.style.left = `${e.clientX}px`; ghost.style.top = `${e.clientY}px`; }
@@ -910,22 +1033,48 @@ export function mountMap(root) {
         const pt = svg.createSVGPoint();
         pt.x = e.clientX; pt.y = e.clientY;
         const l = pt.matrixTransform(bedEl.getScreenCTM().inverse());
-        await placeCrop(crop.id, target, { x: l.x / U, y: l.y / U });
+        await onDrop(target, { x: l.x / U, y: l.y / U });
         return;
       }
       if (e.type === "pointercancel") return;
-      if (bed) await placeCrop(crop.id, bed);
-      else setPlacing(state.placing === crop.id ? null : crop.id);
+      await onTap();
     };
-    chip.addEventListener("pointerup", finish);
-    chip.addEventListener("pointercancel", finish);
-    chip.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        if (bed) placeCrop(crop.id, bed); else setPlacing(state.placing === crop.id ? null : crop.id);
-      }
+    el.addEventListener("pointerup", finish);
+    el.addEventListener("pointercancel", finish);
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onTap(); }
     });
-    return chip;
+    return el;
+  }
+
+  function cropChip(crop, bed) {
+    const active = state.mode?.type === "crop" && state.mode.id === crop.id;
+    const chip = h("button", { type: "button", class: "chip", "aria-pressed": active ? "true" : "false", title: crop.family || null },
+      h("span", { class: "dot", style: { background: crop.color } }), crop.name);
+    return draggable(chip, {
+      label: crop.name,
+      color: crop.color,
+      onTap: () => (bed ? placeCrop(crop.id, bed) : setMode(active ? null : { type: "crop", id: crop.id })),
+      onDrop: (target, local) => placeCrop(crop.id, target, local),
+    });
+  }
+
+  function orphanChip(p) {
+    const crop = find.crop(p.crop_id);
+    const ph = phases(p);
+    const active = state.mode?.type === "planting" && state.mode.id === p.id;
+    const name = `${crop?.name ?? "Satz"}${p.variety ? " " + p.variety : ""}`;
+    const el = h("button", { type: "button", class: "orphan", "aria-pressed": active ? "true" : "false" },
+      h("span", { class: "dot", style: { background: crop?.color } }),
+      h("span", { class: "name" }, crop?.name ?? "Satz", p.variety ? h("span", { class: "muted" }, ` ${p.variety}`) : null),
+      h("span", { class: "when" }, `${ph.plant != null ? "pflanzen" : "säen"} ${fmtDay(ph.fieldStart)}`),
+      h("span", { class: "size" }, `${fmtNum(p.len)} m`));
+    return draggable(el, {
+      label: name,
+      color: crop?.color || "#6a9b3c",
+      onTap: () => setMode(active ? null : { type: "planting", id: p.id }),
+      onDrop: (target, local) => assignPlanting(p.id, target, local),
+    });
   }
 
   function bedPanel(bed) {
@@ -1032,6 +1181,8 @@ export function mountMap(root) {
       issues.length ? h("ul", { class: "issues" }, issues.map((i) => h("li", { class: i.kind }, i.text))) : null,
       kv,
       p.notes ? h("p", { class: "small", style: { margin: 0, whiteSpace: "pre-wrap" } }, p.notes) : null,
+      bed ? null : h("div", {},
+        h("button", { type: "button", class: "btn btn-sm btn-primary", onclick: () => setMode({ type: "planting", id: p.id }) }, "Auf ein Beet setzen")),
       h("div", { class: "actions" },
         h("button", { type: "button", class: "btn btn-sm", onclick: () => createSuccession(p, 14), title: "Gleiche Kultur 14 Tage später" }, icon("copy"), "Folgesatz"),
         bed ? h("button", { type: "button", class: "btn btn-sm btn-quiet", onclick: () => select({ type: "bed", id: bed.id }) }, `${bed.name} zeigen`) : null,
@@ -1135,6 +1286,7 @@ export function mountMap(root) {
     destroy() {
       ro.disconnect();
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onDocPointer, true);
       cancelAnimationFrame(frame);
     },
   };

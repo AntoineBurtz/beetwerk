@@ -1,4 +1,4 @@
-import { state, load, subscribe, setDay, undo, select, setPlacing } from "./store.js";
+import { state, load, subscribe, setDay, undo, select, setMode } from "./store.js";
 import { h, fmtDay, isoWeek, isoOf, dayNum, todayNum, yearOf, MONTHS_SHORT } from "./util.js";
 import { toast, iconBtn } from "./ui.js";
 import { mountMap } from "./map.js";
@@ -25,7 +25,7 @@ function route() {
   current?.destroy?.();
   root.replaceChildren();
   currentName = viewName;
-  if (state.placing) setPlacing(null);
+  if (state.mode && viewName !== "karte") setMode(null);
   current = VIEWS[viewName](root);
   for (const a of document.querySelectorAll(".tabs a")) {
     if (a.dataset.view === viewName) a.setAttribute("aria-current", "page");
@@ -66,7 +66,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     undo();
   } else if (e.key === "Escape") {
-    if (state.placing) setPlacing(null);
+    if (state.mode) setMode(null);
     else if (state.sel) select(null);
   } else if (e.key === "[" || e.key === "PageUp") {
     setDay(state.day - 7);
