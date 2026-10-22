@@ -337,6 +337,10 @@ h3 { font-size: 15px; }
 /* ------------------------------------------------------------- Zeitleiste */
 
 .tlview { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.tl-main { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
+.tl-panel { width: 340px; border-left: 1px solid var(--line); }
+.tl-row.selected .tl-label { background: var(--leaf-soft); box-shadow: inset 3px 0 0 var(--leaf); }
+.tl-label button[aria-pressed="true"] { text-decoration: none; }
 .toolbar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--line);
@@ -754,4 +758,21 @@ body.geo-open { overflow: hidden; }
   .fab-menu { right: 12px; bottom: 72px; }
   .map-hint { left: 62px; right: 12px; transform: none; white-space: normal; padding: 6px 6px 6px 12px; font-size: 13px; }
   .map-hint:not([hidden]) ~ .orphan-pill { top: 76px; }
+}
+
+/* ------------------------------------------------------------- Beet-Eigenschaften in der Seitenleiste */
+
+.bed-props .panel-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bed-props-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.bed-props .field > span { font-size: 12px; }
+.bed-props .input { min-height: 34px; }
+.bed-props textarea.input { min-height: 54px; resize: vertical; }
+
+@media (max-width: 760px) {
+  .tl-main { grid-template-columns: 1fr; }
+  .tl-panel {
+    position: fixed; left: 0; right: 0; bottom: var(--tabbar-h); z-index: 40;
+    width: auto; max-height: 62vh; border-left: 0; border-top: 1px solid var(--line);
+    border-radius: 12px 12px 0 0; box-shadow: 0 -10px 30px -12px rgba(29, 43, 36, .4);
+  }
 }

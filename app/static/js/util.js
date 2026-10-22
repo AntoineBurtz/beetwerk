@@ -101,16 +101,27 @@ export function spacing(p, crop) {
   };
 }
 
-export function rowCount(p, crop, bed) {
-  if (p.rows) return p.rows;
+// Pflanzbild: Reihen laufen immer entlang der längeren Seite der Fläche.
+// along = "x": Reihen waagrecht (entlang der Länge), sonst senkrecht.
+export function plantLayout(p, crop, bed) {
   const sp = spacing(p, crop);
-  return Math.max(1, Math.floor((spanOf(p, bed) * 100 + 0.5) / sp.row));
+  const lenM = p.len;
+  const spanM = spanOf(p, bed);
+  const along = lenM >= spanM ? "x" : "y";
+  const longM = along === "x" ? lenM : spanM;
+  const shortM = along === "x" ? spanM : lenM;
+  const rows = p.rows || Math.max(1, Math.floor((shortM * 100 + 0.5) / sp.row));
+  const perRow = Math.max(1, Math.floor((longM * 100 + 0.5) / sp.plant));
+  return { along, rows, perRow, sp };
+}
+
+export function rowCount(p, crop, bed) {
+  return plantLayout(p, crop, bed).rows;
 }
 
 export function plantCount(p, crop, bed) {
-  const sp = spacing(p, crop);
-  const perRow = Math.max(1, Math.floor((p.len * 100 + 0.5) / sp.plant));
-  return rowCount(p, crop, bed) * perRow;
+  const l = plantLayout(p, crop, bed);
+  return l.rows * l.perRow;
 }
 
 export function area(p, bed) {

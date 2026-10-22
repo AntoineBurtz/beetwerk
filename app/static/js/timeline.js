@@ -1,11 +1,12 @@
 // Zeitleiste: jede Zeile ein Beet, jeder Balken ein Satz mit Anzucht, Kultur und Ernte.
-import { state, find, select, patch, setDay, issuesOf } from "./store.js";
+import { state, find, select, patch, remove, setDay, issuesOf } from "./store.js";
 import {
   h, phases, mix, textOn, clamp, fmtDay, fmtNum, isoOf, yearOf, yearStart, yearLength, isoWeek,
   MONTHS, MONTHS_SHORT, PLANTABLE, KIND_LABEL, spanOf, todayNum, dayNum,
 } from "./util.js";
-import { openPlantingEditor, firstFreeStart } from "./editor.js";
-import { iconBtn } from "./ui.js";
+import { openPlantingEditor, openBedEditor, firstFreeStart } from "./editor.js";
+import { iconBtn, icon, confirmDialog, replaceKeepingFocus } from "./ui.js";
+import { bedProperties, bedUsage } from "./bedpanel.js";
 
 const ZOOMS = [1.3, 2, 3, 4.6, 7, 11];
 let zoomIdx = 2;
@@ -28,8 +29,35 @@ export function mountTimeline(root) {
     h("button", { type: "button", class: "btn btn-primary btn-sm", onclick: () => openPlantingEditor(null, { anchor: state.day }) }, "Neuer Satz"),
   );
   const scroll = h("div", { class: "tl-scroll" });
-  const el = h("div", { class: "tlview" }, toolbar, scroll);
+  const side = h("aside", { class: "panel tl-panel", "aria-label": "Beet bearbeiten", hidden: true });
+  const el = h("div", { class: "tlview" }, toolbar, h("div", { class: "tl-main" }, scroll, side));
   root.append(el);
+
+  // Seitenleiste mit den Eigenschaften des gewählten Beets
+  function renderSide() {
+    const bed = state.sel?.type === "bed" ? find.bed(state.sel.id) : null;
+    side.hidden = !bed;
+    if (!bed) { side.replaceChildren(); return; }
+    replaceKeepingFocus(side, [
+      bedProperties(bed, {
+        onClose: () => select(null),
+        actions: [
+          h("button", { type: "button", class: "btn btn-sm", onclick: () => { location.hash = "karte"; } }, "Auf der Karte zeigen"),
+          h("button", { type: "button", class: "btn btn-sm btn-quiet", onclick: () => openBedEditor(bed), title: "Lage, Drehung und alle Eigenschaften" }, icon("edit"), "Mehr"),
+          h("button", { type: "button", class: "btn btn-sm btn-danger", onclick: () => deleteBed(bed) }, icon("trash"), "Löschen"),
+        ],
+      }),
+      ...bedUsage(bed, { onPlanting: (p) => openPlantingEditor(p) }),
+    ]);
+  }
+
+  async function deleteBed(bed) {
+    const count = state.plantings.filter((p) => p.bed_id === bed.id).length;
+    const ok = await confirmDialog(count
+      ? `${bed.name} wird gelöscht. Die ${count} Sätze darin bleiben erhalten und stehen danach unter „Ohne Beet“.`
+      : `${bed.name} wird gelöscht.`, { title: "Beet löschen?" });
+    if (ok) await remove("beds", bed.id, { undoLabel: `${bed.name} gelöscht` });
+  }
 
   let geo = null; // aktuelle Geometrie: { year, ys, len, ppd, labelW }
   let drag = null;
@@ -157,13 +185,15 @@ export function mountTimeline(root) {
       openPlantingEditor(null, { bed_id: bed?.id ?? null, anchor: day });
     });
     const labelText = bed ? bed.name : "Ohne Beet";
+    const selected = !!bed && state.sel?.type === "bed" && state.sel.id === bed.id;
     const label = h("div", { class: "tl-label", style: { width: `${geo.labelW}px` } },
       bed
-        ? h("button", { type: "button", title: `${labelText} auf der Karte zeigen`, onclick: () => { select({ type: "bed", id: bed.id }); location.hash = "karte"; } }, labelText)
+        ? h("button", { type: "button", title: `${labelText} bearbeiten`, "aria-pressed": selected ? "true" : "false",
+          onclick: () => select(selected ? null : { type: "bed", id: bed.id }) }, labelText)
         : h("span", { class: "muted" }, labelText),
       bed ? h("span", { class: "muted small", style: { display: "block", fontWeight: 400 } },
         `${bed.kind !== "bed" ? KIND_LABEL[bed.kind] + ", " : ""}${fmtNum(bed.length)} × ${fmtNum(bed.width)} m`) : null);
-    return h("div", { class: "tl-row", "data-bed": bed ? bed.id : "" }, label, track);
+    return h("div", { class: `tl-row${selected ? " selected" : ""}`, "data-bed": bed ? bed.id : "" }, label, track);
   }
 
   function bar(p, ph, lane, bed) {
@@ -362,14 +392,15 @@ export function mountTimeline(root) {
   window.addEventListener("resize", onResize);
 
   render();
+  renderSide();
 
   return {
     update(reason) {
       if (drag) return;
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        if (reason === "day") moveDayMarker();
-        else render();
+        if (reason === "day") { moveDayMarker(); renderSide(); }
+        else { render(); renderSide(); }
       });
     },
     destroy() {

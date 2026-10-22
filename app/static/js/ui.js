@@ -58,3 +58,20 @@ export function icon(name) {
 export function iconBtn(name, label, onclick, extra = {}) {
   return h("button", { type: "button", class: "icon-btn", "aria-label": label, title: label, onclick, ...extra }, icon(name));
 }
+
+// Inhalt ersetzen, ohne dass ein Eingabefeld darin den Fokus verliert (Merkmal: data-focus-key)
+export function replaceKeepingFocus(container, children) {
+  const active = document.activeElement;
+  const key = active && container.contains(active) ? active.dataset?.focusKey : null;
+  const range = key && typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
+  const top = container.scrollTop;
+  container.replaceChildren(...children.filter(Boolean));
+  container.scrollTop = top;
+  if (!key) return;
+  const el = container.querySelector(`[data-focus-key="${key}"]`);
+  if (!el) return;
+  el.focus({ preventScroll: true });
+  if (range && el.setSelectionRange) {
+    try { el.setSelectionRange(...range); } catch { /* nicht jedes Feld kennt eine Auswahl */ }
+  }
+}
