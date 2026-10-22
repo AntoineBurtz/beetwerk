@@ -1,8 +1,8 @@
 // Dialoge zum Bearbeiten von Sätzen, Beeten, Kulturen und Einstellungen.
-import { state, find, create, patch, remove, issuesOf, api, replaceAll, select, emit } from "./store.js";
+import { state, find, create, patch, remove, issuesOf, api, replaceAll, select, emit, setMode, setDay } from "./store.js";
 import {
   h, dayNum, isoOf, datesFromCrop, rowCount, plantCount, spanOf, fmtNum, KIND_LABEL, PLANTABLE,
-  phases, rectOf, round2, clamp, plural,
+  phases, rectOf, round2, clamp, plural, fmtDay,
 } from "./util.js";
 import { toast, confirmDialog, icon } from "./ui.js";
 import { openGeoSetup } from "./geosetup.js";
@@ -259,7 +259,14 @@ export function openPlantingEditor(planting, defaults = {}) {
       }
       const item = await create("plantings", payload);
       select({ type: "planting", id: item.id });
-      toast(`${c.name} angelegt`);
+      if (payload.bed_id == null) {
+        toast(`${c.name} angelegt, noch ohne Beet`, {
+          action: "Beet zuweisen",
+          onAction: () => { setMode({ type: "planting", id: item.id }); location.hash = "karte"; },
+        });
+      } else {
+        toast(`${c.name} angelegt`);
+      }
     } else {
       await patch("plantings", p.id, payload, { undoLabel: "Satz gespeichert", silent: true });
     }
@@ -578,20 +585,67 @@ export function openSettings() {
 
 // ---------------------------------------------------------------- Neue Beete und Sätze an Ort und Stelle
 
+export const DEFAULT_BED_SIZE = { bed: [4, 1.2], raised: [2, 1], greenhouse: [4, 3], path: [4, 0.5], other: [1.5, 1.5] };
+
+function nextBedName(kind) {
+  const base = { bed: "Beet", raised: "Hochbeet", greenhouse: "Gewächshaus", path: "Weg", other: "Fläche" }[kind] || "Beet";
+  const taken = new Set(state.beds.map((b) => b.name));
+  let n = state.beds.filter((b) => b.kind === kind).length + 1;
+  while (taken.has(`${base} ${n}`)) n += 1;
+  return `${base} ${n}`;
+}
+
 export async function createBedAt(kind, cx, cy) {
-  const sizes = { bed: [4, 1.2], raised: [2, 1], greenhouse: [4, 3], path: [4, 0.5], other: [1.5, 1.5] };
-  const [length, width] = sizes[kind] || sizes.bed;
-  const count = state.beds.filter((b) => b.kind === kind).length + 1;
-  const base = { bed: "Beet", raised: "Hochbeet", greenhouse: "Gewächshaus", path: "Weg", other: "Fläche" }[kind];
+  const [length, width] = DEFAULT_BED_SIZE[kind] || DEFAULT_BED_SIZE.bed;
   const gw = Number(state.settings.garden_width || 16);
   const gh = Number(state.settings.garden_height || 11);
-  const item = await create("beds", {
-    name: `${base} ${count}`, kind, length, width,
-    x: round2(clamp(cx - length / 2, 0, Math.max(0, gw - length))),
-    y: round2(clamp(cy - width / 2, 0, Math.max(0, gh - width))),
-  });
+  return createBedRect(kind,
+    round2(clamp(cx - length / 2, 0, Math.max(0, gw - length))),
+    round2(clamp(cy - width / 2, 0, Math.max(0, gh - width))),
+    length, width);
+}
+
+// Neue Fläche mit Lage und Größe in Metern (links oben, ungedreht)
+export async function createBedRect(kind, x, y, length, width) {
+  const name = nextBedName(kind);
+  const item = await create("beds", { name, kind, x: round2(x), y: round2(y), length: round2(length), width: round2(width) },
+    { undoLabel: `${name} angelegt` });
   select({ type: "bed", id: item.id });
   return item;
+}
+
+// Satz ohne Beet einem Beet zuweisen; local = Stelle im Beet in Metern (Antippen oder Loslassen)
+export async function assignPlanting(pid, bed, local = null) {
+  const p = find.planting(pid);
+  if (!p || !bed) return null;
+  if (!PLANTABLE.has(bed.kind)) {
+    toast(`${KIND_LABEL[bed.kind]} ist keine Anbaufläche`, { error: true });
+    return null;
+  }
+  const crop = find.crop(p.crop_id);
+  const ph = phases(p);
+  const len = round2(Math.min(p.len, bed.length));
+  let span = p.span != null && p.span < bed.width - 0.001 ? p.span : null;
+  let offset = 0;
+  let start;
+  if (local) {
+    start = round2(clamp(Math.round((local.x - len / 2) * 10) / 10, 0, Math.max(0, bed.length - len)));
+    if (span != null) offset = round2(clamp(Math.round((local.y - span / 2) * 10) / 10, 0, bed.width - span));
+  } else {
+    start = firstFreeStart(bed, len, { offset, span, from: ph.fieldStart, to: ph.he, excludeId: p.id });
+    if (start == null) {
+      start = 0;
+      toast(`In ${bed.name} ist zu dieser Zeit kein Platz frei, der Satz überschneidet sich`, { error: true });
+    }
+  }
+  await patch("plantings", p.id, { bed_id: bed.id, start, len, offset, span },
+    { undoLabel: `${crop?.name ?? "Satz"} in ${bed.name} gesetzt` });
+  select({ type: "planting", id: p.id });
+  const visible = ph.fieldStart <= state.day + 21 && state.day <= ph.he;
+  if (!visible) {
+    toast(`Auf der Karte zu sehen ab ${fmtDay(ph.fieldStart)}`, { action: "Hinspringen", onAction: () => setDay(ph.fieldStart) });
+  }
+  return p;
 }
 
 export async function placeCrop(cropId, bed, local = null) {

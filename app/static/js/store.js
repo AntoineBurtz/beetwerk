@@ -43,7 +43,8 @@ export const state = {
   plantings: [],
   day: initialDay(),
   sel: null, // { type: "bed" | "planting", id }
-  placing: null, // Kultur-ID, die als Nächstes aufs Beet gesetzt wird
+  // Modus der Karte: Kultur setzen, Satz ohne Beet zuweisen oder neue Fläche aufziehen
+  mode: null, // { type: "crop", id } | { type: "planting", id } | { type: "bed", kind }
   loaded: false,
 };
 
@@ -98,17 +99,18 @@ export function select(sel) {
   emit("select");
 }
 
-export function setPlacing(cropId) {
-  state.placing = cropId;
+export function setMode(mode) {
+  state.mode = mode;
   emit("select");
 }
 
-export async function create(kind, data) {
+export async function create(kind, data, { undoLabel } = {}) {
   try {
     const item = await api.post(`/api/${kind}`, data);
     state[LIST[kind]].push(item);
     if (kind === "crops") state.crops.sort((a, b) => a.name.localeCompare(b.name, "de"));
     emit("data");
+    if (undoLabel) pushUndo({ type: "create", kind, id: item.id, label: undoLabel });
     return item;
   } catch (e) {
     toast(e.message, { error: true });
@@ -171,6 +173,8 @@ export async function undo() {
   try {
     if (entry.type === "patch") {
       await patch(entry.kind, entry.id, entry.before);
+    } else if (entry.type === "create") {
+      await remove(entry.kind, entry.id);
     } else if (entry.type === "delete") {
       const { id, ...rest } = entry.item;
       const restored = await create(entry.kind, rest);

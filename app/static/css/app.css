@@ -629,7 +629,7 @@ body.geo-open { overflow: hidden; }
 .map-svg.sat .bed-body { fill-opacity: .42; }
 .map-svg.sat .planting > rect:first-child { fill-opacity: .78; }
 .map-attrib {
-  position: absolute; right: 6px; bottom: 6px; max-width: calc(100% - 12px);
+  position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 96px);
   font-size: 11px; color: var(--ink-2); background: rgba(251, 252, 249, .82);
   padding: 1px 6px; border-radius: 3px; pointer-events: none;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -648,4 +648,74 @@ body.geo-open { overflow: hidden; }
   .geo-body { grid-template-columns: 1fr; grid-template-rows: minmax(0, 60fr) minmax(0, 40fr); }
   .geo-panel { border-left: 0; border-top: 1px solid var(--line); padding: 12px; gap: 12px; }
   .geo-foot { bottom: -12px; margin: auto -12px -12px; padding: 10px 12px; }
+}
+
+/* ------------------------------------------------------------- Neue Flächen und Sätze ohne Beet */
+
+.fab {
+  position: absolute; right: 16px; bottom: 16px; z-index: 6;
+  width: 56px; height: 56px; border-radius: 50%; border: 0;
+  display: grid; place-items: center; cursor: pointer;
+  background: var(--leaf); color: #fff; box-shadow: var(--shadow);
+}
+.fab:hover { background: var(--leaf-hover); }
+.fab svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.fab.active { box-shadow: 0 0 0 3px var(--signal), var(--shadow); }
+.fab-menu {
+  position: absolute; right: 16px; bottom: 82px; z-index: 7; min-width: 190px;
+  display: grid; padding: 4px; background: var(--surface); border-radius: var(--r-m); box-shadow: var(--shadow);
+}
+.fab-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 0; border-radius: var(--r-s);
+  background: transparent; text-align: left; cursor: pointer; font-weight: 500;
+}
+.fab-item:hover, .fab-item:focus-visible { background: var(--surface-2); }
+.fab-item .swatch { width: 22px; height: 14px; border-radius: 2px; border: 2px solid #6b4f3a; background: #b4967a; }
+.fab-item.kind-raised .swatch { border-width: 3px; border-color: #7a5a3c; }
+.fab-item.kind-greenhouse .swatch { background: #c9b294; border-color: #5c7a86; }
+.fab-item.kind-path .swatch { background: #e7e4dc; border-color: #b9b3a6; }
+.fab-item.kind-other .swatch { background: #cfc6b4; border-color: #8f8470; }
+
+.map-svg.drawing, .map-svg.drawing .bed, .map-svg.drawing .planting { cursor: crosshair; }
+.map-svg .draft rect { fill: rgba(242, 194, 0, .22); stroke: var(--signal); stroke-width: 2; stroke-dasharray: 6 4; }
+.map-svg .draft text {
+  text-anchor: middle; font-family: var(--font-cond); font-weight: 600; fill: var(--ink);
+  paint-order: stroke; stroke: rgba(251, 252, 249, .9); stroke-linejoin: round;
+}
+
+.orphan-pill {
+  position: absolute; top: 12px; right: 12px; z-index: 5;
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 12px 5px 5px; border-radius: 999px; cursor: pointer;
+  background: var(--warn-soft); color: var(--warn); border: 1px solid rgba(154, 98, 0, .35);
+  font-weight: 600; font-size: 14px; box-shadow: var(--shadow);
+}
+.orphan-pill:hover { background: #f1ddb0; }
+.orphan-pill .count {
+  min-width: 24px; height: 24px; padding: 0 6px; border-radius: 12px; display: grid; place-items: center;
+  background: var(--warn); color: #fff; font-size: 13px;
+}
+.map-hint:not([hidden]) ~ .orphan-pill { top: 58px; }
+
+.orphan-list { display: grid; gap: 6px; }
+.orphan {
+  display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 8px;
+  padding: 7px 10px; border: 1px dashed rgba(154, 98, 0, .55); border-radius: var(--r-m);
+  background: #fff; text-align: left; cursor: grab; font-size: 14px;
+  user-select: none; -webkit-user-select: none; touch-action: none;
+}
+.orphan:hover { border-style: solid; }
+.orphan[aria-pressed="true"] { border: 1px solid var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.orphan .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.orphan .when, .orphan .size { color: var(--ink-3); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.panel-section.orphans { background: #fdf8ec; }
+.panel-section.orphans.flash { animation: orphan-flash 1.2s ease-out; }
+@keyframes orphan-flash { from { background: var(--warn-soft); } to { background: #fdf8ec; } }
+@media (prefers-reduced-motion: reduce) { .panel-section.orphans.flash { animation: none; } }
+
+@media (max-width: 760px) {
+  .fab { right: 12px; bottom: 12px; width: 52px; height: 52px; }
+  .fab-menu { right: 12px; bottom: 72px; }
+  .map-hint { left: 62px; right: 12px; transform: none; white-space: normal; padding: 6px 6px 6px 12px; font-size: 13px; }
+  .map-hint:not([hidden]) ~ .orphan-pill { top: 76px; }
 }
