@@ -40,6 +40,18 @@ AUTH_PASSWORD = os.environ.get("BEETWERK_PASSWORD", "")
 
 
 @app.middleware("http")
+async def fresh_ui(request: Request, call_next):
+    """Oberfläche immer beim Server nachfragen lassen (dank ETag meist nur ein kurzes 304).
+
+    Sonst kann der Browser nach einem Update alte und neue Programmteile mischen.
+    """
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/") and "cache-control" not in response.headers:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.middleware("http")
 async def basic_auth(request: Request, call_next):
     if AUTH_PASSWORD and request.url.path != "/api/health":
         ok = False
