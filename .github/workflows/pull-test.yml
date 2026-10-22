@@ -1,0 +1,10 @@
+name: Anonymer Pull-Test
+on:
+  push:
+    branches: [diagnose/anonym-pull]
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    steps:
+      - run: docker logout ghcr.io || true
+      - run: docker pull ghcr.io/antoineburtz/beetwerk:latest
