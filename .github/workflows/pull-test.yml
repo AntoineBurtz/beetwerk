@@ -2,9 +2,19 @@ name: Anonymer Pull-Test
 on:
   push:
     branches: [diagnose/anonym-pull]
+permissions:
+  contents: read
+  packages: read
 jobs:
   pull:
     runs-on: ubuntu-latest
     steps:
-      - run: docker logout ghcr.io || true
-      - run: docker pull ghcr.io/antoineburtz/beetwerk:latest
+      - name: Ohne Anmeldung
+        id: anon
+        continue-on-error: true
+        run: docker logout ghcr.io || true; docker pull ghcr.io/antoineburtz/beetwerk:latest
+      - name: Mit Anmeldung
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker pull ghcr.io/antoineburtz/beetwerk:latest
+          echo "anonym: ${{ steps.anon.outcome }}"
