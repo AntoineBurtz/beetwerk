@@ -144,3 +144,33 @@ def test_export_keeps_geo_and_delete(client):
     assert not IMAGE_PATH.exists()
     client.post("/api/import", json=exported)
     assert client.get("/api/data").json()["geo"]["image_missing"] is True
+
+
+def test_anchor_puts_side_on_grid():
+    # Kante 0 (20 m) als untere Seite: Kurs 65°, linke Ecke = Ecke 0
+    g = geo.build_geo(fakemap.PLOT, 65, anchor=0)
+    (x0, y0), (x1, y1) = g["polygon"][0], g["polygon"][1]
+    assert abs(y0 - y1) < 1e-3                      # waagrecht
+    assert y0 == pytest.approx(max(p[1] for p in g["polygon"]), abs=1e-3)  # ganz unten
+    assert abs(x0 - round(x0)) < 1e-3 and abs(y0 - round(y0)) < 1e-3     # Ecke auf vollen Metern
+    assert x1 > x0
+
+    # Dieselbe Kante links: Kurs 335°, obere Ecke = Ecke 0
+    g = geo.build_geo(fakemap.PLOT, 335, anchor=0)
+    (x0, y0), (x1, y1) = g["polygon"][0], g["polygon"][1]
+    assert abs(x0 - x1) < 1e-3                      # senkrecht
+    assert x0 == pytest.approx(min(p[0] for p in g["polygon"]), abs=1e-3)  # ganz links
+    assert abs(x0 - round(x0)) < 1e-3 and abs(y0 - round(y0)) < 1e-3
+    assert y1 > y0
+
+
+def test_put_geo_keeps_orientation_choice(client, mapserver):
+    body = {"boundary": fakemap.PLOT, "bearing": 335, "source": "custom", "orient": "edge",
+            "ref_edge": 0, "ref_side": "left", "anchor": 0,
+            "custom": {"type": "wms", "url": f"{mapserver}/wms", "layers": "test"}}
+    r = client.put("/api/garden/geo", json=body)
+    assert r.status_code == 200, r.text
+    g = r.json()["geo"]
+    assert (g["ref_edge"], g["ref_side"], g["orient"]) == (0, "left", "edge")
+    assert any(o["id"] == "bayern-label" for o in r.json()["imagery"]["overlays"])
+    assert {s["kind"] for s in r.json()["imagery"]["sources"]} == {"aerial", "map"}

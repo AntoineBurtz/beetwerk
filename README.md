@@ -19,23 +19,30 @@ Dazu gibt es:
 
 ## Grundstück auf dem Luftbild
 
-Unter **Einstellungen → Grundstück** oder in der Seitenleiste der Karte: Adresse suchen, nah heranzoomen und die Ecken des Gartens der Reihe nach antippen. Die erste Ecke noch einmal antippen schließt die Grenze; danach lassen sich Ecken verschieben. Angezeigt werden Kantenlängen und Fläche.
+Unter **Einstellungen → Grundstück** oder in der Seitenleiste der Karte. Die Einrichtung läuft in vier Schritten:
 
-- **Ausrichtung:** Die Beetkarte wird so gedreht, dass eine Grundstückskante waagrecht liegt (Standard: die längste, eine andere Kante antippen zum Wechseln), oder mit Norden oben. Ein Nordpfeil auf der Karte zeigt die Himmelsrichtung.
-- **Luftbild:** Beim Übernehmen speichert der Server einen Ausschnitt rund um die Grenze in `data/imagery/`. Die Karte lädt danach nichts mehr aus dem Internet. Der Schalter mit dem Ebenen-Symbol blendet das Bild ein und aus. Unter Einstellungen lässt es sich neu laden, z. B. wenn neue Befliegungen erscheinen.
+1. **Garten finden:** Oben nach Adresse oder Ort suchen, oder in der Karte heranzoomen. Die Karte zeigt zuerst Straßen und Orte (Webkarte Bayern bzw. OpenStreetMap); nach der Suche wechselt sie zum Luftbild. Oben rechts auf der Karte lässt sich jederzeit zwischen **Karte** und **Luftbild** umschalten, im Luftbild auch die Beschriftung **Straßen und Orte** ein- und ausblenden.
+2. **Grenze zeichnen:** Die Ecken des Gartens der Reihe nach antippen, die erste Ecke noch einmal antippen schließt die Grenze. Danach lassen sich Ecken verschieben; Kantenlängen und Fläche werden angezeigt.
+3. **Ausrichtung wählen:** Eine Seite des Gartens antippen (Standard: die längste) und festlegen, ob sie in der Beetkarte **unten, links, rechts oder oben** liegt. Eine Vorschau zeigt, wie die Beetkarte danach aussieht. Das **Raster** verläuft parallel zu dieser Seite und beginnt an ihrer Ecke auf vollen Metern. Alternativ: Norden oben.
+4. **Übernehmen:** Der Server speichert einen Luftbild-Ausschnitt rund um die Grenze.
+
+Danach:
+
+- **Luftbild:** liegt in `data/imagery/`, die Karte lädt danach nichts mehr aus dem Internet. Der Schalter mit dem Ebenen-Symbol blendet das Bild ein und aus. Unter Einstellungen lässt es sich neu laden, z. B. wenn neue Befliegungen erscheinen. Ein Nordpfeil zeigt die Himmelsrichtung.
 - **Beete als Anker:** Wird die Grenze später neu gezeichnet oder anders ausgerichtet, bleiben alle Beete an ihrer Stelle im Garten. Beim Drehen eines Beets rastet der Winkel parallel oder rechtwinklig zu den Grundstückskanten ein (Umschalt hält das Einrasten an).
 
 **Quellen:**
 
 | Quelle | Gebiet | Bedingungen |
 |---|---|---|
-| Luftbild Bayern (DOP 20 cm), Farbe oder Colorinfrarot | Bayern | Open Data der Bayerischen Vermessungsverwaltung, CC BY 4.0. Die Quellenangabe steht auf der Karte. |
-| OpenStreetMap | weltweit | nur zum Zurechtfinden, wird nicht gespeichert |
+| Luftbild Bayern (DOP 20 cm), Farbe oder Colorinfrarot | Bayern | Open Data der Bayerischen Vermessungsverwaltung, CC BY 4.0. Vorschau über den WMTS, gespeichert wird über den WMS in voller Auflösung. |
+| Webkarte Bayern, Beschriftung Bayern (Straßen und Orte) | Bayern | Open Data der Bayerischen Vermessungsverwaltung (WMTS Geobasisdaten), Quellenangabe auf der Karte, nur in der Einrichtung |
+| OpenStreetMap | weltweit | nur in der Einrichtung zum Zurechtfinden, wird nicht gespeichert |
 | Eigene Quelle (WMS oder XYZ-Kacheln) | frei wählbar | z. B. der Orthofoto-WMS eines anderen Bundeslands; die Nutzungsbedingungen der Quelle gelten |
 
-Google Maps ist nicht eingebaut: Es braucht einen API-Schlüssel mit hinterlegter Zahlung, und die Bilder dürfen nicht gespeichert werden.
+Google Maps ist nicht eingebaut: Es braucht einen API-Schlüssel mit hinterlegter Zahlung, und die Bilder dürfen nicht gespeichert werden. Die üblichen freien Beschriftungsebenen von CARTO verlangen seit 2026 ebenfalls einen API-Schlüssel.
 
-Die Adresssuche nutzt Nominatim (OpenStreetMap). Gesucht wird nur, wenn du auf „Suchen“ tippst; dabei geht der Suchbegriff an nominatim.openstreetmap.org. Luftbild-Kacheln lädt beim Einrichten der Browser direkt vom jeweiligen Dienst.
+Die Adresssuche nutzt Nominatim (OpenStreetMap). Gesucht wird nur, wenn du auf „Suchen“ tippst; dabei geht der Suchbegriff an nominatim.openstreetmap.org. Karten- und Luftbild-Kacheln lädt beim Einrichten der Browser direkt vom jeweiligen Dienst.
 
 ## Installation
 
@@ -150,4 +157,4 @@ Aufbau:
 
 Schrift: Barlow (SIL Open Font License) und Kartenbibliothek Leaflet 1.9.4 (BSD-2-Clause) sind lokal eingebunden, damit die Oberfläche ohne Internet läuft.
 
-Für Tests mit Luftbild gibt es einen kleinen Fake-Kartendienst: `python tests/fakemap.py 8790` liefert unter `http://127.0.0.1:8790/wms` (Layer beliebig) bzw. `/tiles/{z}/{x}/{y}.jpg` ein künstliches Grundstück bei 48,0° N / 11,0° O.
+Für Tests mit Luftbild gibt es einen kleinen Fake-Kartendienst: `python tests/fakemap.py 8790` liefert unter `http://127.0.0.1:8790/wms` (Layer beliebig) bzw. `/tiles/{z}/{x}/{y}.jpg` ein künstliches Grundstück bei 48,0° N / 11,0° O, dazu `/map/…` als Straßenkarte und `/label/…` als Beschriftung.
