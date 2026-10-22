@@ -1,13 +1,14 @@
 // Beetkarte: Grundstück mit Beeten, darauf die Sätze, die am Stichtag im Beet stehen.
 import { state, find, select, patch, remove, setDay, setMode, issuesOf, api, replaceAll } from "./store.js";
 import {
-  h, s, phases, onBedAt, rectOf, spanOf, rowCount, plantCount, spacing, mix, clamp, snap, round2,
+  h, s, phases, onBedAt, rectOf, spanOf, rowCount, plantCount, plantLayout, spacing, mix, clamp, snap, round2,
   fmtDay, fmtNum, yearOf, yearStart, yearLength, MONTHS_SHORT, KIND_LABEL, PLANTABLE, isoOf, plural,
 } from "./util.js";
 import {
   openPlantingEditor, openBedEditor, createBedRect, placeCrop, createSuccession, assignPlanting, DEFAULT_BED_SIZE,
 } from "./editor.js";
-import { iconBtn, icon, toast, confirmDialog } from "./ui.js";
+import { iconBtn, icon, toast, confirmDialog, replaceKeepingFocus } from "./ui.js";
+import { bedProperties, bedUsage, miniTimeline } from "./bedpanel.js";
 import { openGeoSetup } from "./geosetup.js";
 
 const U = 100; // SVG-Einheiten pro Meter, also Zentimeter
@@ -26,6 +27,7 @@ function writeSat(on) {
 }
 
 export function mountMap(root) {
+  view = null; // beim Öffnen immer den ganzen Garten zentriert zeigen
   const svg = s("svg", { class: "map-svg", role: "application", "aria-label": "Beetkarte", tabindex: "0" });
   const satBtn = iconBtn("layers", "Luftbild ein- oder ausblenden", () => {
     showSat = !showSat;
@@ -472,23 +474,27 @@ export function mountMap(root) {
 
   function drawPlants(p, crop, bed, x, y, w, hh, color) {
     const g = s("g", { "pointer-events": "none" });
-    const sp = spacing(p, crop);
-    const rows = rowCount(p, crop, bed);
-    const perRow = Math.max(1, Math.floor((p.len * 100 + 0.5) / sp.plant));
+    const { along, rows, perRow, sp } = plantLayout(p, crop, bed);
     const dark = mix(color, "#1d2b24", 0.1);
+    // Position von Reihe i, Pflanze j; Reihen laufen entlang der längeren Seite
+    const at = (i, j) => (along === "x"
+      ? [x + (w * (j + 0.5)) / perRow, y + (hh * (i + 0.5)) / rows]
+      : [x + (w * (i + 0.5)) / rows, y + (hh * (j + 0.5)) / perRow]);
     if (rows * perRow > 900) {
+      const inset = 4;
       for (let i = 0; i < rows; i++) {
-        const ry = y + (hh * (i + 0.5)) / rows;
-        g.append(s("line", { x1: x + 4, x2: x + w - 4, y1: ry, y2: ry, stroke: dark,
-          "stroke-width": Math.min(sp.row * 0.4, 10), "stroke-linecap": "round", opacity: 0.8 }));
+        const [ax, ay] = at(i, 0);
+        const line = along === "x"
+          ? { x1: x + inset, x2: x + w - inset, y1: ay, y2: ay }
+          : { x1: ax, x2: ax, y1: y + inset, y2: y + hh - inset };
+        g.append(s("line", { ...line, stroke: dark, "stroke-width": Math.min(sp.row * 0.4, 10), "stroke-linecap": "round", opacity: 0.8 }));
       }
       return g;
     }
     const rad = clamp(Math.min(sp.row, sp.plant) * 0.36, 1.2, 55);
     for (let i = 0; i < rows; i++) {
-      const cy = y + (hh * (i + 0.5)) / rows;
       for (let j = 0; j < perRow; j++) {
-        const cx = x + (w * (j + 0.5)) / perRow;
+        const [cx, cy] = at(i, j);
         g.append(s("circle", { cx, cy, r: rad, fill: dark, opacity: 0.85 }));
       }
     }
@@ -766,7 +772,13 @@ export function mountMap(root) {
         hideDraft();
         const r = drawRect(g.w0, toWorld(e));
         if (r.w < 0.2 || r.h < 0.2) { toast("Zu klein: mindestens 20 × 20 cm aufziehen"); break; }
-        await createBedRect(g.kind, r.x, r.y, r.w, r.h);
+        if (r.h > r.w) {
+          // Hochkant aufgezogen: als Beet mit der langen Seite als Länge anlegen und um 90° drehen
+          const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+          await createBedRect(g.kind, round2(cx - r.h / 2), round2(cy - r.w / 2), r.h, r.w, 90);
+        } else {
+          await createBedRect(g.kind, r.x, r.y, r.w, r.h);
+        }
         break;
       }
       case "move-bed": {
@@ -914,15 +926,7 @@ export function mountMap(root) {
     if (sel?.type === "planting" && find.planting(sel.id)) parts.push(...plantingPanel(find.planting(sel.id)));
     else if (sel?.type === "bed" && find.bed(sel.id)) parts.push(...bedPanel(find.bed(sel.id)));
     else parts.push(...overviewPanel());
-    const scrollTop = panel.scrollTop;
-    const focusedSearch = document.activeElement?.classList?.contains("crop-search");
-    panel.replaceChildren(...parts);
-    panel.scrollTop = scrollTop;
-    if (focusedSearch) {
-      const inp = panel.querySelector(".crop-search");
-      inp?.focus();
-      inp?.setSelectionRange(inp.value.length, inp.value.length);
-    }
+    replaceKeepingFocus(panel, parts);
   }
 
   function section(...children) { return h("section", { class: "panel-section" }, ...children); }
@@ -991,7 +995,7 @@ export function mountMap(root) {
     const crops = [...state.crops].sort((a, b) => a.name.localeCompare(b.name, "de"))
       .filter((c) => !q || c.name.toLowerCase().includes(q) || (c.family || "").toLowerCase().includes(q));
     const chips = h("div", { class: "chips" }, crops.map((c) => cropChip(c, plantable ? bed : null)));
-    const search = h("input", { class: "input crop-search", type: "search", placeholder: "Kultur suchen", value: cropQuery,
+    const search = h("input", { class: "input crop-search", type: "search", placeholder: "Kultur suchen", value: cropQuery, "data-focus-key": "crop-search",
       "aria-label": "Kultur suchen",
       oninput: (e) => { cropQuery = e.target.value; schedule("panel"); } });
     return section(
@@ -1078,67 +1082,16 @@ export function mountMap(root) {
   }
 
   function bedPanel(bed) {
-    const year = yearOf(state.day);
-    const ys = yearStart(year), ye = ys + yearLength(year) - 1;
-    const mine = state.plantings.filter((p) => p.bed_id === bed.id);
-    const thisYear = mine.filter((p) => { const ph = phases(p); return ph.sow <= ye && ph.he >= ys; })
-      .sort((a, b) => phases(a).fieldStart - phases(b).fieldStart);
-    const plantable = PLANTABLE.has(bed.kind);
-    const out = [section(
-      h("div", { class: "panel-title" }, h("h2", {}, bed.name),
-        h("button", { type: "button", class: "btn btn-sm", onclick: () => openBedEditor(bed) }, icon("edit"), "Bearbeiten")),
-      h("p", { class: "muted", style: { margin: 0 } },
-        `${KIND_LABEL[bed.kind]}, ${fmtNum(bed.length)} × ${fmtNum(bed.width)} m (${fmtNum(bed.length * bed.width)} m²)`),
-      h("div", { class: "actions" },
+    const out = [bedProperties(bed, {
+      actions: [
         h("button", { type: "button", class: "btn btn-sm", onclick: () => patch("beds", bed.id, { rotation: ((bed.rotation || 0) + 90) % 360 }, { undoLabel: `${bed.name} gedreht` }) }, icon("rotate"), "90° drehen"),
-        h("button", { type: "button", class: "btn btn-sm btn-danger", onclick: deleteSelected }, icon("trash"), "Löschen")),
-    )];
-    if (plantable) {
-      out.push(section(h("h3", {}, `Belegung ${year}`),
-        thisYear.length
-          ? h("div", { class: "bed-timeline" }, thisYear.map((p) => {
-            const c = find.crop(p.crop_id);
-            return h("div", { class: "row" },
-              h("button", { type: "button", onclick: () => select({ type: "planting", id: p.id }), title: `${c?.name} ${p.variety}` },
-                c?.name ?? "Kultur", p.variety ? h("span", { class: "muted" }, ` ${p.variety}`) : null),
-              miniTimeline(p, year));
-          }))
-          : h("p", { class: "muted small", style: { margin: 0 } }, "Noch nichts geplant.")));
-      out.push(section(h("h3", {}, "Fruchtfolge"), rotationHistory(bed, year)));
-      out.push(cropSection(bed));
-    }
+        h("button", { type: "button", class: "btn btn-sm btn-quiet", onclick: () => openBedEditor(bed), title: "Lage, Drehung und alle Eigenschaften" }, icon("edit"), "Mehr"),
+        h("button", { type: "button", class: "btn btn-sm btn-danger", onclick: deleteSelected }, icon("trash"), "Löschen"),
+      ],
+    })];
+    out.push(...bedUsage(bed, { onPlanting: (p) => select({ type: "planting", id: p.id }) }));
+    if (PLANTABLE.has(bed.kind)) out.push(cropSection(bed));
     return out;
-  }
-
-  function rotationHistory(bed, year) {
-    const n = Math.max(3, Number(state.settings.rotation_years ?? 3));
-    const grid = h("div", { class: "bed-history" });
-    for (let y = year; y >= year - n; y--) {
-      const fams = new Set();
-      for (const p of state.plantings) {
-        if (p.bed_id !== bed.id || yearOf(phases(p).fieldStart) !== y) continue;
-        const c = find.crop(p.crop_id);
-        if (c?.family) fams.add(c.family);
-      }
-      grid.append(h("span", { class: "num muted" }, y),
-        h("span", { class: "fams" }, fams.size ? [...fams].map((f) => h("span", { class: "fam" }, f)) : h("span", { class: "muted small" }, "–")));
-    }
-    return grid;
-  }
-
-  function miniTimeline(p, year) {
-    const ys = yearStart(year), len = yearLength(year);
-    const ph = phases(p);
-    const c = find.crop(p.crop_id);
-    const color = c?.color || "#6a9b3c";
-    const pct = (d) => `${clamp(((d - ys) / len) * 100, 0, 100)}%`;
-    const w = (a, b) => `calc(${pct(b + 1)} - ${pct(a)})`;
-    const bar = h("div", { class: "mini-tl", title: `${fmtDay(ph.sow)} bis ${fmtDay(ph.he)}` });
-    if (ph.plant != null) bar.append(h("i", { style: { left: pct(ph.sow), width: w(ph.sow, ph.plant - 1), background: mix(color, "#ffffff", 0.7), top: "3px", bottom: "3px" } }));
-    bar.append(h("i", { style: { left: pct(ph.fieldStart), width: w(ph.fieldStart, ph.hs - 1), background: mix(color, "#ffffff", 0.45) } }));
-    bar.append(h("i", { style: { left: pct(ph.hs), width: w(ph.hs, ph.he), background: color } }));
-    if (state.day >= ys && state.day < ys + len) bar.append(h("span", { class: "now", style: { left: pct(state.day) } }));
-    return bar;
   }
 
   function plantingPanel(p) {

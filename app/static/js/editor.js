@@ -606,9 +606,9 @@ export async function createBedAt(kind, cx, cy) {
 }
 
 // Neue Fläche mit Lage und Größe in Metern (links oben, ungedreht)
-export async function createBedRect(kind, x, y, length, width) {
+export async function createBedRect(kind, x, y, length, width, rotation = 0) {
   const name = nextBedName(kind);
-  const item = await create("beds", { name, kind, x: round2(x), y: round2(y), length: round2(length), width: round2(width) },
+  const item = await create("beds", { name, kind, x: round2(x), y: round2(y), length: round2(length), width: round2(width), rotation },
     { undoLabel: `${name} angelegt` });
   select({ type: "bed", id: item.id });
   return item;

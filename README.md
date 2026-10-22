@@ -114,6 +114,7 @@ BEETWERK_DATA=./data uvicorn app.main:app --host 0.0.0.0 --port 8000
 | Karte | Sätze ohne Beet (z. B. aus der Zeitleiste ohne Beet angelegt) zeigt ein Hinweis oben rechts. In der Seitenleiste lassen sie sich auf ein Beet ziehen oder antippen und dann aufs Beet tippen. |
 | Zeitleiste | Balken waagerecht ziehen verschiebt alle Termine, senkrecht in eine andere Zeile wechselt das Beet. Rechte Kante ändert das Ernteende, linke Kante den Aussaattermin. |
 | Zeitleiste | Klick auf eine freie Stelle legt dort einen neuen Satz an. Klick in den Kopf setzt den Stichtag. |
+| Zeitleiste | Klick auf den Beetnamen links öffnet rechts die Eigenschaften des Beets (Name, Art, Länge, Breite, Notizen) zum direkten Bearbeiten, dazu Belegung und Fruchtfolge. Esc oder × schließt. |
 | Überall | `[` und `]` springen eine Woche zurück oder vor, Strg+Z macht die letzte Änderung rückgängig. |
 
 ### Begriffe
@@ -121,7 +122,7 @@ BEETWERK_DATA=./data uvicorn app.main:app --host 0.0.0.0 --port 8000
 - **Satz**: eine Pflanzung einer Kultur und Sorte an einer Stelle, mit Aussaat, ggf. Pflanzung, Erntebeginn und Ernteende.
 - **Bis zur Ernte** (Kultur): Tage ab Pflanzung, bei Direktsaat ab Aussaat.
 - **Breite leer** im Satz heißt: reicht bis zum Beetrand.
-- **Reihen leer** heißt: aus Breite und Reihenabstand berechnet.
+- **Reihen leer** heißt: automatisch berechnet. Reihen laufen immer entlang der längeren Seite der Fläche (ein 1 × 20 m Beet mit 50 × 50 cm hat 2 Reihen à 40 Pflanzen).
 
 ## Schnittstelle
 
