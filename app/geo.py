@@ -26,30 +26,68 @@ WMS_RESOLUTION = 0.1     # Meter pro Pixel beim WMS-Abruf
 MAX_PIXELS = 4000
 MAX_TILES = 64
 
+BAYERN_WMTS = "https://wmtsod{s}.bayernwolke.de/wmts/%s/smerc/{z}/{x}/{y}"
+BAYERN_SUBDOMAINS = "123456789"
+BAYERN_DOP_ATTR = "Luftbild © Bayerische Vermessungsverwaltung, CC BY 4.0"
+BAYERN_MAP_ATTR = "© Datenquellen: Bayerische Vermessungsverwaltung, GeoBasis-DE / BKG 2023 – Daten verändert"
+
+# kind: "aerial" = Luftbild (kann gespeichert werden), "map" = Straßenkarte zur Orientierung.
+# Für Luftbilder gibt "tiles" die schnelle Kachel-Vorschau an; gespeichert wird über WMS in voller Auflösung.
 SOURCES = {
     "bayern-dop20": {
-        "label": "Luftbild Bayern (20 cm)",
+        "label": "Luftbild Bayern",
+        "kind": "aerial",
         "type": "wms",
         "url": "https://geoservices.bayern.de/od/wms/dop/v1/dop20",
         "layers": "by_dop20c",
-        "attribution": "Luftbild © Bayerische Vermessungsverwaltung, CC BY 4.0",
+        "tiles": BAYERN_WMTS % "by_dop",
+        "subdomains": BAYERN_SUBDOMAINS,
+        "max_zoom": 19,
+        "attribution": BAYERN_DOP_ATTR,
         "snapshot": True,
     },
     "bayern-dop20-cir": {
         "label": "Luftbild Bayern Colorinfrarot",
+        "kind": "aerial",
         "type": "wms",
         "url": "https://geoservices.bayern.de/od/wms/dop/v1/dop20",
         "layers": "by_dop20cir",
-        "attribution": "Luftbild © Bayerische Vermessungsverwaltung, CC BY 4.0",
+        "tiles": BAYERN_WMTS % "by_dop_cir",
+        "subdomains": BAYERN_SUBDOMAINS,
+        "max_zoom": 19,
+        "attribution": BAYERN_DOP_ATTR,
         "snapshot": True,
     },
+    "bayern-webkarte": {
+        "label": "Webkarte Bayern",
+        "kind": "map",
+        "type": "xyz",
+        "url": BAYERN_WMTS % "by_webkarte",
+        "subdomains": BAYERN_SUBDOMAINS,
+        "max_zoom": 19,
+        "attribution": BAYERN_MAP_ATTR,
+        "snapshot": False,
+    },
     "osm": {
-        "label": "OpenStreetMap (nur zur Orientierung)",
+        "label": "OpenStreetMap",
+        "kind": "map",
         "type": "xyz",
         "url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
         "max_zoom": 19,
         "attribution": "© OpenStreetMap-Mitwirkende",
         "snapshot": False,
+    },
+}
+
+# Beschriftung (Straßen, Orte) zum Überlagern des Luftbilds
+OVERLAYS = {
+    "bayern-label": {
+        "label": "Straßen und Orte",
+        "type": "xyz",
+        "url": BAYERN_WMTS % "by_label",
+        "subdomains": BAYERN_SUBDOMAINS,
+        "max_zoom": 19,
+        "attribution": BAYERN_MAP_ATTR,
     },
 }
 
@@ -117,10 +155,31 @@ def polygon_area(pts: list[tuple[float, float]]) -> float:
     return abs(sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1]))) / 2
 
 
-def build_geo(boundary: list[tuple[float, float]], bearing: float) -> dict:
+def align_to_corner(f: Frame, corner: tuple[float, float]) -> None:
+    """Versatz so verschieben, dass die Ecke auf vollen Metern liegt.
+
+    Dann laufen die Rasterlinien genau durch diese Ecke und entlang der gewählten Seite.
+    Das Grundstück rückt dabei höchstens einen halben Meter; ist die Grenze nicht ganz
+    rechtwinklig, darf eine andere Ecke so auch knapp vor der Null-Linie liegen.
+    """
+    cx, cy = f.to_local(*corner)
+    f.ox -= grid_shift(cx)
+    f.oy -= grid_shift(cy)
+
+
+def grid_shift(v: float) -> float:
+    """Verschiebung auf den nächsten vollen Meter (höchstens einen halben Meter in jede Richtung)."""
+    return round(v) - v
+
+
+def build_geo(boundary: list[tuple[float, float]], bearing: float, anchor: int | None = None) -> dict:
     if len(boundary) < 3:
         raise GeoError("Die Grenze braucht mindestens drei Punkte")
     f = frame_for(boundary, bearing)
+    if anchor is not None:
+        if not 0 <= anchor < len(boundary):
+            raise GeoError("Ungültige Ecke für die Ausrichtung")
+        align_to_corner(f, boundary[anchor])
     poly = [f.to_local(lat, lon) for lat, lon in boundary]
     width = max(x for x, _ in poly)
     height = max(y for _, y in poly)
@@ -247,9 +306,10 @@ def fetch_xyz(src: dict, bbox: tuple[float, float, float, float]) -> tuple[bytes
         z -= 1
     size = None
     mosaic = None
+    sub = (src.get("subdomains") or "a")[0]
     for ty in range(y0, y1 + 1):
         for tx in range(x0, x1 + 1):
-            url = (src["url"].replace("{z}", str(z)).replace("{x}", str(tx))
+            url = (src["url"].replace("{s}", sub).replace("{z}", str(z)).replace("{x}", str(tx))
                    .replace("{y}", str(ty)).replace("{-y}", str(2 ** z - 1 - ty)))
             data, _ = _get(url)
             try:

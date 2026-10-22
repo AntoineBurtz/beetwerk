@@ -151,6 +151,11 @@ class GeoIn(BaseModel):
     bearing: float
     source: str = "bayern-dop20"
     custom: Optional[CustomSource] = None
+    # Ausrichtung: gewählte Seite (Index der Kante ab Ecke i) und wo sie in der Beetkarte liegt
+    orient: Literal["edge", "north"] = "edge"
+    ref_edge: Optional[int] = Field(None, ge=0)
+    ref_side: Optional[Literal["bottom", "left", "right", "top"]] = None
+    anchor: Optional[int] = Field(None, ge=0)
 
     @field_validator("boundary")
     @classmethod
@@ -265,7 +270,8 @@ def _geo_public(g: Optional[dict]) -> Optional[dict]:
 
 def _imagery(raw: dict) -> dict:
     sources = [{"id": k, **v} for k, v in geo.SOURCES.items()]
-    return {"sources": sources, "custom": geo.loads(raw.get("imagery_custom"))}
+    overlays = [{"id": k, **v} for k, v in geo.OVERLAYS.items()]
+    return {"sources": sources, "overlays": overlays, "custom": geo.loads(raw.get("imagery_custom"))}
 
 
 @app.get("/api/data")
@@ -464,13 +470,17 @@ def _source_for(conn, source: str, custom: Optional[CustomSource]) -> dict:
 def set_garden_geo(body: GeoIn):
     """Grenze speichern, Beete mitnehmen und Luftbild holen."""
     try:
-        new = geo.build_geo([tuple(p) for p in body.boundary], body.bearing)
+        new = geo.build_geo([tuple(p) for p in body.boundary], body.bearing, body.anchor)
         with db.session() as conn:
             src = _source_for(conn, body.source, body.custom)
             old = geo.loads(_settings(conn).get("geo"))
     except geo.GeoError as exc:
         _err(422, str(exc))
     new["source"] = body.source
+    new["orient"] = body.orient
+    if body.orient == "edge" and body.ref_edge is not None and body.ref_edge < len(body.boundary):
+        new["ref_edge"] = body.ref_edge
+        new["ref_side"] = body.ref_side or "bottom"
 
     warning = None
     if src.get("snapshot", True):

@@ -3,6 +3,8 @@
 Das Bild zeigt ein um 25° gedrehtes Grundstück (20 x 12 m) mit drei Beeten und roten
 Eckpunkten an bekannten Koordinaten. So lässt sich prüfen, ob Grenze und Bild deckungsgleich sind.
 
+Außerdem /map/… (Straßenkarte) und /label/… (nur Beschriftung) als Kacheln.
+
 Start von Hand: python tests/fakemap.py 8790
 """
 import io
@@ -44,6 +46,34 @@ W2, H2 = SIZE[0] / 2, SIZE[1] / 2
 PLOT = rect(-W2, -H2, W2, H2)
 CORNERS = PLOT
 BEDS = [rect(-8, 3, 8, 4.2), rect(-8, 0, 8, 1.2), rect(-8, -3, 8, -1.8)]
+
+
+STREETS = [((-80, -14), (80, -14), "Musterweg"), ((-22, -80), (-22, 80), "Gartenstraße")]
+
+
+def render_map(width, height, to_px, labels_only=False):
+    """Straßenkarte bzw. reine Beschriftung (transparent) für die Einrichtungsansicht."""
+    if labels_only:
+        img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    else:
+        img = Image.new("RGBA", (width, height), (242, 239, 233, 255))
+    d = ImageDraw.Draw(img)
+    if not labels_only:
+        for (a, b, _) in STREETS:
+            d.line([to_px(*ll(*a)), to_px(*ll(*b))], fill=(255, 255, 255, 255), width=10)
+        for e0, n0 in [(-14, 10), (14, 10), (-14, -24), (14, -24)]:
+            d.polygon([to_px(*p) for p in rect(e0 - 4, n0 - 3, e0 + 4, n0 + 3)], fill=(217, 208, 201, 255))
+        d.polygon([to_px(*p) for p in PLOT], outline=(170, 200, 160, 255))
+    else:
+        for (a, b, name) in STREETS:
+            mx, my = [(u + v) / 2 for u, v in zip(a, b)]
+            for k in (-40, 0, 40):
+                pos = (mx + (k if a[1] == b[1] else 0), my + (k if a[0] == b[0] else 0))
+                x, y = to_px(*ll(*pos))
+                d.text((x - 24, y - 6), name, fill=(60, 60, 60, 255))
+    out = io.BytesIO()
+    img.save(out, "PNG")
+    return out.getvalue()
 
 
 def render(width, height, to_px):
@@ -101,12 +131,14 @@ class Handler(BaseHTTPRequestHandler):
                     return (lon - west) / (east - west) * w, (north - lat) / (north - south) * h
             return self._send(200, render(w, h, to_px), "image/jpeg")
         parts = url.path.strip("/").split("/")
-        if len(parts) == 4 and parts[0] == "tiles":
+        if len(parts) == 4 and parts[0] in ("tiles", "map", "label"):
             z, x, y = int(parts[1]), int(parts[2]), int(parts[3].split(".")[0])
 
             def to_px(lat, lon):
                 return (tile_x(lon, z) - x) * 256, (tile_y(lat, z) - y) * 256
-            return self._send(200, render(256, 256, to_px), "image/jpeg")
+            if parts[0] == "tiles":
+                return self._send(200, render(256, 256, to_px), "image/jpeg")
+            return self._send(200, render_map(256, 256, to_px, labels_only=parts[0] == "label"), "image/png")
         self._send(404, b"nicht gefunden", "text/plain")
 
     def _send(self, code, body, ctype):
