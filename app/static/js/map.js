@@ -6,22 +6,43 @@ import {
 } from "./util.js";
 import { openPlantingEditor, openBedEditor, createBedAt, placeCrop, createSuccession } from "./editor.js";
 import { iconBtn, icon, toast, confirmDialog } from "./ui.js";
+import { openGeoSetup } from "./geosetup.js";
 
 const U = 100; // SVG-Einheiten pro Meter, also Zentimeter
 const UPCOMING_DAYS = 21;
 
 let view = null; // { x, y, w, h } bleibt beim Wechsel der Ansicht erhalten
 let cropQuery = "";
+let showSat = readSat();
+
+function readSat() {
+  try { return localStorage.getItem("beetwerk.sat") !== "0"; } catch { return true; }
+}
+
+function writeSat(on) {
+  try { localStorage.setItem("beetwerk.sat", on ? "1" : "0"); } catch { /* egal */ }
+}
 
 export function mountMap(root) {
   const svg = s("svg", { class: "map-svg", role: "application", "aria-label": "Beetkarte", tabindex: "0" });
+  const satBtn = iconBtn("layers", "Luftbild ein- oder ausblenden", () => {
+    showSat = !showSat;
+    writeSat(showSat);
+    schedule("svg");
+  }, { hidden: true });
+  const compass = h("div", { class: "compass", title: "Norden", hidden: true },
+    s("svg", { viewBox: "0 0 24 24", "aria-hidden": "true" },
+      s("path", { d: "M12 2l5 12-5-3-5 3z", fill: "currentColor" }),
+      s("text", { x: 12, y: 23, "text-anchor": "middle", style: "font: 700 8px var(--font)", fill: "currentColor" }, "N")));
   const tools = h("div", { class: "map-tools" },
     iconBtn("plus", "Vergrößern", () => zoomAtCenter(0.75)),
     iconBtn("minus", "Verkleinern", () => zoomAtCenter(1.33)),
-    iconBtn("fit", "Ganzen Garten zeigen", () => { fit(); render(); }));
+    iconBtn("fit", "Ganzen Garten zeigen", () => { fit(); render(); }),
+    satBtn, compass);
   const hint = h("div", { class: "map-hint", hidden: true });
   const empty = h("div", { class: "map-empty", hidden: true });
-  const stage = h("div", { style: { position: "relative", minHeight: "0" } }, svg, tools, hint, empty);
+  const attrib = h("div", { class: "map-attrib", hidden: true });
+  const stage = h("div", { style: { position: "relative", minHeight: "0" } }, svg, tools, hint, empty, attrib);
   const scrub = buildScrubber();
   const panel = h("aside", { class: "panel", "aria-label": "Details" });
   const el = h("div", { class: "mapview" }, h("div", { class: "map-area" }, stage, scrub.el), panel);
@@ -127,7 +148,9 @@ export function mountMap(root) {
       s("circle", { cx: 19, cy: 4, r: 1.6, fill: "#cfc9bd" }));
     const hatch = s("pattern", { id: "hatch", width: 14, height: 14, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" },
       s("rect", { width: 4, height: 14, fill: "rgba(251,252,249,.55)" }));
-    return s("defs", {}, minor, major, soil, glass, gravel, hatch);
+    const light = s("pattern", { id: "grid-light", width: 100, height: 100, patternUnits: "userSpaceOnUse" },
+      s("path", { d: "M100 0H0V100", fill: "none", stroke: "rgba(255,255,255,.28)", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
+    return s("defs", {}, minor, major, soil, glass, gravel, hatch, light);
   }
 
   function renderSvg() {
@@ -136,10 +159,7 @@ export function mountMap(root) {
     svg.classList.toggle("placing", !!state.placing);
     const k = upp();
     const { W, H } = gardenSize();
-    const groundLayer = s("g", {},
-      s("rect", { class: "garden", x: 0, y: 0, width: W * U, height: H * U }),
-      s("rect", { x: 0, y: 0, width: W * U, height: H * U, fill: "url(#grid-major)" }),
-      s("rect", { x: 0, y: 0, width: W * U, height: H * U, fill: "none", stroke: "#9fb093", "stroke-width": 1.5, "vector-effect": "non-scaling-stroke" }));
+    const groundLayer = ground(W, H);
 
     // Meterangaben am Rand, ausgedünnt je nach Zoom
     const step = k > 2.2 ? 2 : 1;
@@ -156,6 +176,7 @@ export function mountMap(root) {
     svg.replaceChildren(defs(), groundLayer, ruler, bedLayer, overLayer);
 
     empty.hidden = state.beds.length > 0 || !state.loaded;
+    empty.classList.toggle("low", !!state.geo);
     if (!empty.hidden && !empty.firstChild) renderEmpty();
     if (state.placing) {
       const crop = find.crop(state.placing);
@@ -167,13 +188,71 @@ export function mountMap(root) {
     }
   }
 
+  // Grundstück: Rechteck, oder die gezeichnete Grenze mit Luftbild dahinter
+  function ground(W, H) {
+    const g = state.geo;
+    const sat = !!(showSat && g?.image);
+    svg.classList.toggle("sat", sat);
+    satBtn.hidden = !g?.image;
+    satBtn.setAttribute("aria-pressed", sat ? "true" : "false");
+    compass.hidden = !g;
+    if (g) compass.firstChild.style.transform = `rotate(${90 - g.frame.bearing}deg)`;
+    attrib.hidden = !sat;
+    if (sat) attrib.textContent = g.image.attribution || g.image.source || "";
+
+    if (!g) {
+      return s("g", {},
+        s("rect", { class: "garden", x: 0, y: 0, width: W * U, height: H * U }),
+        s("rect", { x: 0, y: 0, width: W * U, height: H * U, fill: "url(#grid-major)" }),
+        s("rect", { x: 0, y: 0, width: W * U, height: H * U, fill: "none", stroke: "#9fb093", "stroke-width": 1.5, "vector-effect": "non-scaling-stroke" }));
+    }
+    const pts = g.polygon.map(([x, y]) => `${x * U},${y * U}`);
+    const layer = s("g", {});
+    if (sat) {
+      // Luftbild ist nach Norden ausgerichtet (Ost/Nord in Metern) und wird ins Beet-Koordinatensystem gedreht
+      const b = (g.frame.bearing * Math.PI) / 180;
+      const sn = Math.sin(b), cs = Math.cos(b);
+      const [e0, n0, e1, n1] = g.image.enu;
+      layer.append(s("g", { transform: `matrix(${sn} ${cs} ${-cs} ${sn} ${-g.frame.ox * U} ${-g.frame.oy * U})` },
+        s("image", { href: g.image.url, x: e0 * U, y: -n1 * U, width: (e1 - e0) * U, height: (n1 - n0) * U, preserveAspectRatio: "none" })));
+      const big = 100000;
+      layer.append(s("path", { d: `M${-big} ${-big}H${big}V${big}H${-big}Z M${pts.join(" L")} Z`, "fill-rule": "evenodd", fill: "rgba(238,241,234,.55)" }));
+    } else {
+      layer.append(s("polygon", { class: "garden", points: pts.join(" ") }));
+    }
+    layer.append(s("polygon", { points: pts.join(" "), fill: sat ? "url(#grid-light)" : "url(#grid-major)" }));
+    layer.append(s("polygon", { points: pts.join(" "), fill: "none", stroke: sat ? "#f2c200" : "#7f9772",
+      "stroke-width": sat ? 2 : 1.5, "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke" }));
+    return layer;
+  }
+
+  // Drehwinkel rastet an Kanten der Grundstücksgrenze ein (parallel oder rechtwinklig)
+  function snapToEdges(ang) {
+    const poly = state.geo?.polygon;
+    if (!poly) return null;
+    let best = null;
+    let bestDiff = 5;
+    poly.forEach(([x1, y1], i) => {
+      const [x2, y2] = poly[(i + 1) % poly.length];
+      if (Math.hypot(x2 - x1, y2 - y1) < 1) return;
+      const a = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
+      for (let k = 0; k < 4; k++) {
+        const cand = a + 90 * k;
+        const d = Math.abs(((ang - cand) % 360 + 540) % 360 - 180);
+        if (d < bestDiff) { bestDiff = d; best = cand; }
+      }
+    });
+    return best;
+  }
+
   function renderEmpty() {
     empty.replaceChildren(h("div", {},
       h("h2", {}, "Noch keine Beete"),
       h("p", { class: "muted", style: { margin: 0 } },
         "Lege dein erstes Beet an und ziehe es an die richtige Stelle. Größe und Lage stellst du direkt auf der Karte ein."),
       h("div", { class: "row" },
-        h("button", { type: "button", class: "btn btn-primary", onclick: () => addBed("bed") }, "Beet anlegen"),
+        state.geo ? null : h("button", { type: "button", class: "btn btn-primary", onclick: openGeoSetup }, icon("parcel"), "Grundstück auf dem Luftbild festlegen"),
+        h("button", { type: "button", class: state.geo ? "btn btn-primary" : "btn", onclick: () => addBed("bed") }, "Beet anlegen"),
         h("button", {
           type: "button", class: "btn", onclick: async () => {
             try { replaceAll(await api.post("/api/demo")); fit(); render(); toast("Beispielgarten geladen"); }
@@ -243,7 +322,7 @@ export function mountMap(root) {
       }
     } else {
       const gap = Math.min(5 * k, 12);
-      const label = s("text", { class: "bed-name", x: 0, y: -gap, style: `font-size:${fs}px`,
+      const label = s("text", { class: "bed-name", x: 0, y: -gap, style: `font-size:${fs}px; stroke-width:${Math.min(3 * k, 9)}px`,
         transform: flip ? `rotate(180 ${L / 2} ${Wd / 2}) translate(0 ${Wd + gap + fs})` : null },
         bed.name,
         showSize ? s("tspan", { class: "bed-size", dx: 6 * k, style: `font-size:${fs * 0.85}px` }, `${fmtNum(bed.length)} × ${fmtNum(bed.width)} m`) : null);
@@ -502,7 +581,8 @@ export function mountMap(root) {
           const c = { x: (gesture.orig.x + gesture.orig.length / 2) * U, y: (gesture.orig.y + gesture.orig.width / 2) * U };
           const w = toWorld(e);
           let ang = (Math.atan2(w.y - c.y, w.x - c.x) * 180) / Math.PI + 90;
-          ang = ((snap(ang, e.shiftKey ? 1 : 15) % 360) + 360) % 360;
+          ang = e.shiftKey ? snap(ang, 1) : (snapToEdges(ang) ?? snap(ang, 15));
+          ang = round2(((ang % 360) + 360) % 360);
           bed.rotation = ang;
           bedGroup(bed.id)?.setAttribute("transform", bedTransform(bed));
         } else {
@@ -769,6 +849,14 @@ export function mountMap(root) {
     out.push(section(h("h3", {}, "Fläche anlegen"),
       h("div", { class: "actions" }, Object.entries(KIND_LABEL).map(([k, label]) =>
         h("button", { type: "button", class: "btn btn-sm", onclick: () => addBed(k) }, label)))));
+    const g = state.geo;
+    out.push(section(h("h3", {}, "Grundstück"),
+      g ? h("p", { class: "muted small", style: { margin: 0 } },
+        `${fmtNum(g.area, 0)} m² auf dem Luftbild festgelegt.${g.image_missing ? " Das Luftbild fehlt, du kannst es in den Einstellungen neu laden." : ""}`)
+        : h("p", { class: "muted small", style: { margin: 0 } },
+          "Zeichne die Grenze auf dem Luftbild ein. Die Beete liegen dann am richtigen Ort, und das Luftbild lässt sich hinter den Beeten einblenden."),
+      h("div", { class: "actions" },
+        h("button", { type: "button", class: "btn btn-sm", onclick: openGeoSetup }, icon("parcel"), g ? "Grenze bearbeiten" : "Auf dem Luftbild festlegen"))));
     return out;
   }
 
@@ -1035,6 +1123,11 @@ export function mountMap(root) {
   return {
     update(reason) {
       if (gesture && gesture.type !== "pan" && gesture.type !== "pinch" && reason === "data") return;
+      if (state.refit) {
+        state.refit = false;
+        empty.replaceChildren();
+        if (size.w > 1) fit();
+      }
       if (reason === "day") schedule("svg", "panel", "scrub");
       else if (reason === "select") schedule("svg", "panel");
       else schedule("svg", "panel", "scrub", "area");
