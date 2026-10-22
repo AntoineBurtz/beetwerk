@@ -82,3 +82,12 @@ def test_static_index(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "Beetwerk" in r.text
+
+
+def test_ui_is_revalidated(client):
+    for path in ("/", "/js/main.js", "/css/app.css"):
+        r = client.get(path)
+        assert r.headers["cache-control"] == "no-cache"
+        assert "etag" in r.headers
+        again = client.get(path, headers={"If-None-Match": r.headers["etag"]})
+        assert again.status_code == 304
