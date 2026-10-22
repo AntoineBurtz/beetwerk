@@ -35,7 +35,10 @@ Daten liegen in `/mnt/user/appdata/beetwerk`. Der Container gibt den Ordner auto
 
 **Updates:** Docker-Tab → **Check for Updates** → beim Container **apply update**. Daten bleiben erhalten.
 
-**Privates Repo:** Dann ist auch das Image privat und Unraid kann es nicht ohne Anmeldung laden. Am einfachsten auf GitHub unter *Packages → beetwerk → Package settings* die Sichtbarkeit auf *Public* stellen; im Image stecken keine Gartendaten. Alternative: `docker login ghcr.io` mit einem Token mit Leserecht für Packages (muss nach einem Unraid-Neustart wiederholt werden).
+**Privates Repo:** Dann ist auch das Image privat, und Unraid meldet beim Laden `unauthorized`. Zwei Wege:
+
+- Image öffentlich machen: auf GitHub das Paket `beetwerk` öffnen → *Package settings* → *Danger Zone* → *Change visibility* → Public. Im Image stecken keine Gartendaten oder Passwörter. Achtung: Ein öffentliches Paket lässt sich nicht wieder auf privat stellen.
+- Image privat lassen: auf GitHub einen *Personal access token (classic)* mit dem Recht `read:packages` anlegen und auf Unraid einmal `docker login ghcr.io -u <GitHub-Name>` ausführen, als Passwort den Token einfügen. Unraid speichert die Anmeldung auf dem Flash-Stick, sie bleibt nach einem Neustart erhalten.
 
 ### Andere Server mit Docker Compose
 
