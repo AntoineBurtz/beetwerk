@@ -4,15 +4,17 @@ on:
     branches: [diagnose/anonym-pull]
 permissions:
   contents: read
-  packages: read
 jobs:
   anonym:
     runs-on: ubuntu-latest
     steps:
-      - run: docker logout ghcr.io || true; docker pull ghcr.io/antoineburtz/beetwerk:latest
-  angemeldet:
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          docker pull ghcr.io/antoineburtz/beetwerk:latest
+      - name: Kontrolle mit fremdem öffentlichem Image
+        run: |
+          docker logout ghcr.io || true
+          if docker pull ghcr.io/linuxserver/baseimage-alpine:3.20 > out.txt 2>&1; then echo "::notice::Kontrolle ok"; else echo "::error::Kontrolle: $(tail -1 out.txt)"; fi
+      - name: Beetwerk anonym
+        run: |
+          if docker pull ghcr.io/antoineburtz/beetwerk:latest > out.txt 2>&1; then echo "::notice::Beetwerk anonym ok"; else echo "::error::Beetwerk anonym: $(tail -1 out.txt)"; fi
+          TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:antoineburtz/beetwerk:pull" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))")
+          CODE=$(curl -s -o body.txt -w "%{http_code}" -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.v2+json" https://ghcr.io/v2/antoineburtz/beetwerk/manifests/latest)
+          echo "::notice::Manifest anonym HTTP $CODE $(head -c 200 body.txt)"
