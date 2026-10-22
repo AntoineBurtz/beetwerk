@@ -6,15 +6,13 @@ permissions:
   contents: read
   packages: read
 jobs:
-  pull:
+  anonym:
     runs-on: ubuntu-latest
     steps:
-      - name: Ohne Anmeldung
-        id: anon
-        continue-on-error: true
-        run: docker logout ghcr.io || true; docker pull ghcr.io/antoineburtz/beetwerk:latest
-      - name: Mit Anmeldung
-        run: |
+      - run: docker logout ghcr.io || true; docker pull ghcr.io/antoineburtz/beetwerk:latest
+  angemeldet:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           docker pull ghcr.io/antoineburtz/beetwerk:latest
-          echo "anonym: ${{ steps.anon.outcome }}"
