@@ -110,11 +110,30 @@ def init_db() -> None:
         )
     with session() as conn:
         conn.executescript(SCHEMA)
+        migrate(conn)
         conn.execute("PRAGMA journal_mode = WAL")
         for key, value in DEFAULT_SETTINGS.items():
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
         if conn.execute("SELECT COUNT(*) FROM crops").fetchone()[0] == 0:
             seed_crops(conn)
+
+
+# Spalten, die nach der ersten Version dazugekommen sind
+MIGRATIONS = {
+    "plantings": [
+        ("varieties", "TEXT NOT NULL DEFAULT ''"),     # Mischsatz: JSON-Liste [{name, count, ref?}]
+        ("fill", "TEXT NOT NULL DEFAULT 'snake'"),     # Pflanzschema: snake | columns
+        ("fill_start", "TEXT NOT NULL DEFAULT 'tl'"),  # Startecke: tl | tr | bl | br
+    ],
+}
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    for table, columns in MIGRATIONS.items():
+        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in columns:
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
 
 def rows(conn: sqlite3.Connection, sql: str, params=()) -> list[dict]:

@@ -3,6 +3,7 @@
 Start lokal:  uvicorn app.main:app --reload
 """
 import base64
+import json
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -98,6 +99,20 @@ class CropIn(BaseModel):
     notes: Optional[str] = None
 
 
+class VarietyIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    count: int = Field(ge=1, le=9999)
+    ref: Optional[str] = Field(None, max_length=200)  # später: Verweis auf die Sortendatenbank
+
+    @field_validator("name")
+    @classmethod
+    def _strip(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError("Sortenname fehlt")
+        return v
+
+
 class PlantingIn(BaseModel):
     crop_id: Optional[int] = None
     variety: Optional[str] = None
@@ -118,6 +133,10 @@ class PlantingIn(BaseModel):
     planted_done: Optional[bool] = None
     harvest_done: Optional[bool] = None
     notes: Optional[str] = None
+    # Mischsatz: mehrere Sorten in einem Satz, gemeinsame Termine und Abstände
+    varieties: Optional[list[VarietyIn]] = Field(None, max_length=200)
+    fill: Optional[Literal["snake", "columns"]] = None
+    fill_start: Optional[Literal["tl", "tr", "bl", "br"]] = None
 
     @field_validator("sow_date", "plant_date", "harvest_start", "harvest_end")
     @classmethod
@@ -176,7 +195,8 @@ CROP_DEFAULTS = dict(name="Neue Kultur", family="", color="#6a9b3c", method="dir
                      field_days=60, harvest_days=21, row_spacing=30, plant_spacing=30, notes="")
 PLANTING_DEFAULTS = dict(variety="", bed_id=None, method="direct", plant_date=None, start=0.0, len=1.0,
                          offset=0.0, span=None, rows=None, row_spacing=None, plant_spacing=None,
-                         sown_done=False, planted_done=False, harvest_done=False, notes="")
+                         sown_done=False, planted_done=False, harvest_done=False, notes="",
+                         varieties="", fill="snake", fill_start="tl")
 
 
 def _err(status: int, message: str):
@@ -206,6 +226,27 @@ def _update(conn, table: str, item_id: int, changes: dict) -> None:
         f"UPDATE {table} SET {', '.join(f'{k} = ?' for k in changes)} WHERE id = ?",
         [*changes.values(), item_id],
     )
+
+
+def _encode_varieties(record: dict) -> dict:
+    """Sortenliste als JSON-Text speichern; leere Liste = einfacher Satz."""
+    if "varieties" in record:
+        v = record["varieties"]
+        record["varieties"] = json.dumps(v, ensure_ascii=False, separators=(",", ":")) if v else ""
+    return record
+
+
+def _planting_out(row: dict) -> dict:
+    raw = row.get("varieties")
+    try:
+        row["varieties"] = json.loads(raw) if raw else []
+    except ValueError:
+        row["varieties"] = []
+    return row
+
+
+def _get_planting(conn, planting_id: int) -> dict:
+    return _planting_out(_get(conn, "plantings", planting_id))
 
 
 def _bool_flags(record: dict) -> dict:
@@ -284,7 +325,7 @@ def all_data():
             "imagery": _imagery(raw),
             "beds": db.rows(conn, "SELECT * FROM beds ORDER BY sort, name"),
             "crops": db.rows(conn, "SELECT * FROM crops ORDER BY name"),
-            "plantings": db.rows(conn, "SELECT * FROM plantings ORDER BY sow_date, id"),
+            "plantings": [_planting_out(p) for p in db.rows(conn, "SELECT * FROM plantings ORDER BY sow_date, id")],
         }
 
 
@@ -358,26 +399,32 @@ def create_planting(body: PlantingIn):
             _err(422, f"Feld fehlt: {required}")
     record = {**PLANTING_DEFAULTS, **given}
     _bool_flags(record)
+    _encode_varieties(record)
+    for k in ("fill", "fill_start"):
+        if record.get(k) is None:
+            record[k] = PLANTING_DEFAULTS[k]
     with db.session() as conn:
         _check_planting(conn, record)
         new_id = _insert(conn, "plantings", record)
-        return _get(conn, "plantings", new_id)
+        return _get_planting(conn, new_id)
 
 
 @app.patch("/api/plantings/{planting_id}")
 def update_planting(planting_id: int, body: PlantingIn):
     # Hier zählt auch ein explizites null (z. B. Beet entfernen, Reihen auf automatisch)
     changes = _bool_flags(body.model_dump(exclude_unset=True))
-    for not_null in ("crop_id", "method", "sow_date", "harvest_start", "harvest_end", "start", "len", "offset"):
+    for not_null in ("crop_id", "method", "sow_date", "harvest_start", "harvest_end", "start", "len", "offset",
+                     "fill", "fill_start"):
         if not_null in changes and changes[not_null] is None:
             changes.pop(not_null)
+    _encode_varieties(changes)
     with db.session() as conn:
         current = _get(conn, "plantings", planting_id)
         merged = _check_planting(conn, {**current, **changes})
         if "method" in changes or "plant_date" in changes:
             changes["plant_date"] = merged["plant_date"]
         _update(conn, "plantings", planting_id, changes)
-        return _get(conn, "plantings", planting_id)
+        return _get_planting(conn, planting_id)
 
 
 @app.delete("/api/plantings/{planting_id}", status_code=204)
@@ -431,6 +478,8 @@ async def import_all(request: Request):
             cols = {r["name"] for r in db.rows(conn, f"PRAGMA table_info({table})")}
             for item in data.get(table) or []:
                 record = {k: v for k, v in item.items() if k in cols}
+                if table == "plantings" and isinstance(record.get("varieties"), list):
+                    _encode_varieties(record)
                 conn.execute(
                     f"INSERT INTO {table}({', '.join(record)}) VALUES ({', '.join('?' for _ in record)})",
                     list(record.values()),

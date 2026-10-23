@@ -776,3 +776,46 @@ body.geo-open { overflow: hidden; }
     border-radius: 12px 12px 0 0; box-shadow: 0 -10px 30px -12px rgba(29, 43, 36, .4);
   }
 }
+
+/* ------------------------------------------------------------- Mischsatz */
+.mix-summary { margin: 0; min-height: 36px; display: flex; align-items: center; font-size: 14px; color: var(--ink-2); }
+.mix-editor { padding: 12px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--surface); }
+.mix-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.mix-row { display: grid; grid-template-columns: 32px 24px minmax(0, 1fr) 68px 36px; gap: 6px; align-items: center;
+  background: var(--surface); border-radius: var(--r-s); }
+.mix-row.dragging { box-shadow: var(--shadow); outline: 1px solid var(--line-strong); position: relative; z-index: 1; }
+.mix-grip { all: unset; display: grid; place-items: center; width: 32px; height: 36px; cursor: grab; touch-action: none;
+  color: var(--ink-3); border-radius: var(--r-s); }
+.mix-grip:hover { color: var(--ink); background: var(--surface-2); }
+.mix-grip:focus-visible { outline: 2px solid var(--leaf); }
+.mix-row.dragging .mix-grip { cursor: grabbing; }
+.mix-grip svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.mix-dot { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; flex: none;
+  font: 600 13px/1 var(--font-cond); }
+.mix-count-in { text-align: right; }
+.mix-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.mix-warn { color: var(--alert); font-weight: 500; }
+.mix-preview-box { background: var(--grass); border-radius: var(--r-s); }
+.mix-preview { display: block; width: 100%; height: auto; max-height: 220px; }
+.mix-preview .mix-bed { fill: #a98a6a; stroke: var(--soil-dark); stroke-width: 1.5; }
+.mix-preview .mix-path { fill: none; stroke: rgba(255, 255, 255, .7); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.mix-preview .mix-free { fill: none; stroke: rgba(255, 255, 255, .75); stroke-width: 1.2; stroke-dasharray: 2 2; }
+.mix-preview .mix-mark { font-family: var(--font-cond); font-weight: 600; pointer-events: none; }
+.mix-corner { cursor: pointer; outline: none; }
+.mix-corner-hit { fill: transparent; }
+.mix-corner-dot { fill: #fff; stroke: var(--ink); stroke-width: 1.5; }
+.mix-corner:hover .mix-corner-dot { fill: var(--signal); }
+.mix-corner.active .mix-corner-dot { fill: var(--signal); stroke-width: 2.5; }
+.mix-corner:focus-visible .mix-corner-hit { fill: rgba(255, 255, 255, .35); stroke: var(--ink); stroke-width: 2; }
+
+.mix-legend { display: grid; gap: 8px; }
+.mix-legend ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.mix-legend li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; font-size: 14px; }
+.mix-legend .mix-name { font-weight: 500; overflow-wrap: anywhere; }
+.mix-legend .mix-count { color: var(--ink-2); }
+.mix-legend .mix-where { grid-column: 2 / -1; font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+@media (max-width: 760px) {
+  .mix-editor { padding: 10px; }
+  .mix-row { grid-template-columns: 30px 22px minmax(0, 1fr) 58px 34px; gap: 4px; }
+}

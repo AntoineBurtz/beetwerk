@@ -3,6 +3,7 @@
 Kulturdaten sind Richtwerte für Freiland in Süddeutschland. Sie lassen sich
 in der App unter „Kulturen“ anpassen.
 """
+import json
 import sqlite3
 
 # name, familie, farbe, methode, anzucht_tage, tage_bis_ernte, erntedauer, reihenabstand_cm, pflanzabstand_cm
@@ -105,6 +106,18 @@ DEMO_PLANTINGS = [
     ("Artischocke", "Green Globe", "Staudenbeet", "transplant", "2026-02-01", "2026-05-01", "2026-07-15", "2026-09-30", 0, 3, 0, None),
 ]
 
+# Mischsätze im Beispiel: (kultur, beet, aussaat) -> Sorten, Abstände und Pflanzschema
+DEMO_MIXED = {
+    ("Tomate", "Folientunnel", "2026-03-10"): {
+        "varieties": [("Ochsenherz", 4), ("Green Zebra", 3), ("Black Krim", 3), ("Matina", 2), ("Sungold", 3)],
+        "row_spacing": 50, "plant_spacing": 50, "fill": "snake", "fill_start": "tl",
+    },
+    ("Chili", "Beet 2", "2026-02-10"): {
+        "varieties": [("Lemon Drop", 4), ("Habanero Orange", 3), ("Jalapeño", 4), ("Aji Crystal", 3)],
+        "row_spacing": 50, "plant_spacing": 40, "fill": "columns", "fill_start": "tl",
+    },
+}
+
 
 def seed_demo(conn: sqlite3.Connection) -> None:
     bed_ids: dict[str, int] = {}
@@ -119,7 +132,7 @@ def seed_demo(conn: sqlite3.Connection) -> None:
     for (crop, variety, bed, method, sow, plant, hs, he, start, length, offset, span) in DEMO_PLANTINGS:
         if crop not in crop_ids:
             continue
-        conn.execute(
+        cur = conn.execute(
             """INSERT INTO plantings(crop_id, variety, bed_id, method, sow_date, plant_date,
                                      harvest_start, harvest_end, start, len, offset, span,
                                      sown_done, planted_done, harvest_done)
@@ -133,4 +146,13 @@ def seed_demo(conn: sqlite3.Connection) -> None:
                 int(he < "2026-10-01"),
             ),
         )
+        mixed = DEMO_MIXED.get((crop, bed, sow))
+        if mixed:
+            conn.execute(
+                "UPDATE plantings SET variety = '', varieties = ?, row_spacing = ?, plant_spacing = ?, fill = ?, fill_start = ? WHERE id = ?",
+                (
+                    json.dumps([{"name": n, "count": c} for n, c in mixed["varieties"]], ensure_ascii=False, separators=(",", ":")),
+                    mixed["row_spacing"], mixed["plant_spacing"], mixed["fill"], mixed["fill_start"], cur.lastrowid,
+                ),
+            )
     conn.execute("UPDATE settings SET value = 'Beispielgarten' WHERE key = 'garden_name'")

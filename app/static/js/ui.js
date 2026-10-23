@@ -43,6 +43,8 @@ const ICONS = {
   rotate: "M15 6a6 6 0 1 0 1.5 5 M15 2v4h-4",
   layers: "M10 3l7 4-7 4-7-4z M3 11l7 4 7-4",
   parcel: "M4 6l7-3 6 5-2 9-10-2z",
+  grip: "M5 7.5h10 M5 12.5h10",
+  download: "M10 3v10 M6 9l4 4 4-4 M4 16h12",
 };
 
 export function icon(name) {
