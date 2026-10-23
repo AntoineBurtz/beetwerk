@@ -124,6 +124,86 @@ export function plantCount(p, crop, bed) {
   return l.rows * l.perRow;
 }
 
+// ---------------------------------------------------------------- Mischsatz (mehrere Sorten in einem Satz)
+
+export const VARIETY_COLORS = ["#c0392b", "#2d6a4f", "#e8a33b", "#6c3483", "#2f7ab8", "#8c564b",
+  "#d4527e", "#138d90", "#9aa61f", "#5f5e5a", "#e8743b", "#3e5c9a"];
+
+export function varietyColor(i) {
+  return VARIETY_COLORS[i % VARIETY_COLORS.length];
+}
+
+export function varietyMark(i) {
+  return i < 26 ? String.fromCharCode(65 + i) : String(i + 1);
+}
+
+export function isMixed(p) {
+  return Array.isArray(p.varieties) && p.varieties.length > 0;
+}
+
+// Kurzbeschreibung der Sorte(n) für Listen und Beschriftungen
+export function varietyText(p) {
+  if (isMixed(p)) return p.varieties.length === 1 ? p.varieties[0].name : `${p.varieties.length} Sorten`;
+  return p.variety || "";
+}
+
+export function varietyNames(p) {
+  return isMixed(p) ? p.varieties.map((v) => `${v.name} (${v.count})`).join(", ") : p.variety || "";
+}
+
+// Plätze in Pflanzreihenfolge. r/c = Reihe/Platz physisch (Reihe quer zur langen Seite, Platz entlang),
+// row/place = Nummer ab der Startecke (1-basiert). fill: "snake" | "columns", start: "tl" | "tr" | "bl" | "br"
+export function plantOrder(layout, fill = "snake", start = "tl") {
+  const { along, rows, perRow } = layout;
+  const left = start[1] !== "r", top = start[0] !== "b";
+  const L = [...Array(perRow).keys()];
+  const S = [...Array(rows).keys()];
+  if (!(along === "x" ? left : top)) L.reverse();
+  if (!(along === "x" ? top : left)) S.reverse();
+  const placeNo = new Map(L.map((c, i) => [c, i + 1]));
+  const out = [];
+  if (fill === "columns") {
+    L.forEach((c) => S.forEach((r, ri) => out.push({ r, c, row: ri + 1, place: placeNo.get(c) })));
+  } else {
+    S.forEach((r, ri) => (ri % 2 === 0 ? L : [...L].reverse()).forEach((c) => out.push({ r, c, row: ri + 1, place: placeNo.get(c) })));
+  }
+  return out;
+}
+
+// Pflanzplan eines Mischsatzes: Reihenfolge mit Sortenindex v (oder undefined = frei)
+export function mixPlan(p, crop, bed) {
+  const layout = plantLayout(p, crop, bed);
+  const order = plantOrder(layout, p.fill, p.fill_start);
+  const varieties = isMixed(p) ? p.varieties : [];
+  let k = 0;
+  varieties.forEach((v, vi) => {
+    for (let n = 0; n < v.count && k < order.length; n++) order[k++].v = vi;
+  });
+  const total = varieties.reduce((t, v) => t + v.count, 0);
+  return { layout, order, total, capacity: order.length, free: Math.max(0, order.length - total), overflow: Math.max(0, total - order.length) };
+}
+
+// Lage einer Sorte als Text, z. B. "Reihe 1: 1–7 · Reihe 2: 9–10"
+export function varietyPlaces(plan, vi) {
+  const byRow = new Map();
+  for (const o of plan.order) {
+    if (o.v !== vi) continue;
+    if (!byRow.has(o.row)) byRow.set(o.row, []);
+    byRow.get(o.row).push(o.place);
+  }
+  return [...byRow.entries()].sort((a, b) => a[0] - b[0]).map(([row, places]) => {
+    places.sort((a, b) => a - b);
+    const parts = [];
+    let from = places[0], prev = places[0];
+    for (const pl of places.slice(1).concat([null])) {
+      if (pl !== null && pl === prev + 1) { prev = pl; continue; }
+      parts.push(from === prev ? `${from}` : `${from}–${prev}`);
+      from = prev = pl;
+    }
+    return `Reihe ${row}: ${parts.join(", ")}`;
+  }).join(" · ");
+}
+
 export function area(p, bed) {
   return p.len * spanOf(p, bed);
 }

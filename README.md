@@ -16,6 +16,22 @@ Dazu gibt es:
 - Kulturenliste mit 36 Gemüsen als Startwerte (Anzucht, Kulturdauer, Abstände, Familie), frei anpassbar.
 - Folgesätze mit einem Klick, Rückgängig (Strg+Z), JSON-Sicherung.
 - Grundstück auf dem Luftbild: Grenze einzeichnen, Beete liegen am echten Ort, Luftbild hinter den Beeten ein- und ausblenden.
+- Mischsatz: viele Sorten einer Kultur (z. B. 15 Tomatensorten zu je 4 bis 10 Pflanzen) als ein Satz, mit Sortenliste, Pflanzschema und Pflanzplan zum Herunterladen.
+
+## Mischsatz
+
+Wer viele Sorten in kleinen Stückzahlen anbaut, legt dafür einen einzigen Satz an statt vieler kleiner:
+
+1. Im Satz-Dialog „Mehrere Sorten (Mischsatz)“ ankreuzen.
+2. Sorten mit Anzahl eintragen. Eingabe springt zur Anzahl, ein zweites Eingabe legt die nächste Zeile an. Eine kopierte Spalte aus Baserow oder einer Tabelle (Name, optional Tabulator oder Semikolon und Anzahl) lässt sich direkt in ein Namensfeld einfügen.
+3. Reihenfolge am Griff links ändern (ziehen oder Pfeiltasten). Die Plätze im Beet rücken automatisch nach.
+4. Pflanzschema wählen: **Schlange** (die Reihe entlang, am Ende eine Reihe weiter und zurück) oder **Querreihen** (je ein Platz pro Reihe, dann einen Platz weiter). In der Vorschau die Startecke antippen.
+
+Termine und Abstände gelten für alle Sorten gemeinsam. Der Dialog zeigt, wie viele Plätze belegt oder frei sind; passt es nicht, schlägt er eine passende Länge vor.
+
+Auf der Karte bekommt jede Sorte eine Farbe und einen Buchstaben, in der Zeitleiste bleibt es ein Balken („Tomate 15 Sorten“). Die Seitenleiste listet jede Sorte mit ihrer Lage („Reihe 1: 1–7 · Reihe 2: 9–10“) und bietet den Pflanzplan als CSV (Reihe; Platz; Kürzel; Sorte) zum Ausdrucken an. In der Bedarfsliste erscheint jede Sorte mit ihrer Stückzahl.
+
+Jede Sorte hat neben Name und Anzahl ein freies Feld `ref` für eine spätere Verknüpfung mit einer Sortendatenbank wie Baserow.
 
 ## Grundstück auf dem Luftbild
 
@@ -123,6 +139,7 @@ BEETWERK_DATA=./data uvicorn app.main:app --host 0.0.0.0 --port 8000
 - **Bis zur Ernte** (Kultur): Tage ab Pflanzung, bei Direktsaat ab Aussaat.
 - **Breite leer** im Satz heißt: reicht bis zum Beetrand.
 - **Reihen leer** heißt: automatisch berechnet. Reihen laufen immer entlang der längeren Seite der Fläche (ein 1 × 20 m Beet mit 50 × 50 cm hat 2 Reihen à 40 Pflanzen).
+- **Reihe und Platz** im Mischsatz werden ab der gewählten Startecke gezählt.
 
 ## Schnittstelle
 
@@ -132,6 +149,8 @@ Die REST-API ist unter `/api/docs` dokumentiert. Wichtige Endpunkte:
 - `POST/PATCH/DELETE /api/beds`, `/api/crops`, `/api/plantings`
 - `GET /api/export`, `POST /api/import` für JSON-Sicherungen
 - `POST /api/demo?replace=true` lädt den Beispielgarten
+
+Ein Mischsatz trägt `varieties` (Liste aus `{"name", "count", "ref"}`), `fill` (`snake` oder `columns`) und `fill_start` (`tl`, `tr`, `bl`, `br`). Eine leere Liste macht ihn wieder zum normalen Satz mit `variety`.
 
 Damit lässt sich z. B. aus Home Assistant oder einem Skript abfragen, was diese Woche zu säen ist, oder eine Sortenliste aus Baserow übernehmen.
 

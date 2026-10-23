@@ -2,7 +2,7 @@
 import { state, find, select, patch, remove, setDay, issuesOf } from "./store.js";
 import {
   h, phases, mix, textOn, clamp, fmtDay, fmtNum, isoOf, yearOf, yearStart, yearLength, isoWeek,
-  MONTHS, MONTHS_SHORT, PLANTABLE, KIND_LABEL, spanOf, todayNum, dayNum,
+  MONTHS, MONTHS_SHORT, PLANTABLE, KIND_LABEL, spanOf, todayNum, dayNum, isMixed, varietyText,
 } from "./util.js";
 import { openPlantingEditor, openBedEditor, firstFreeStart } from "./editor.js";
 import { iconBtn, icon, confirmDialog, replaceKeepingFocus } from "./ui.js";
@@ -223,7 +223,7 @@ export function mountTimeline(root) {
     el.dataset.fx = fx;
     el.append(h("div", { class: "bar-label", style: { left: `${fx}px`, right: 0, color: textColor,
       textShadow: textColor === "#ffffff" ? "0 0 3px rgba(0,0,0,.35)" : "0 0 3px rgba(255,255,255,.7)" } },
-      h("span", {}, crop?.name ?? "Kultur"), p.variety ? h("span", { class: "v" }, p.variety) : null));
+      h("span", {}, crop?.name ?? "Kultur"), varietyText(p) ? h("span", { class: "v" }, varietyText(p)) : null));
     if (issues.length) {
       el.append(h("span", { class: `flag ${conflict ? "conflict" : "rotation"}`, style: { right: "3px", top: "3.5px" } }, "!"));
     }
@@ -233,7 +233,12 @@ export function mountTimeline(root) {
   }
 
   function tooltip(p, ph, crop, bed, issues) {
-    const lines = [`${crop?.name ?? "Kultur"}${p.variety ? " " + p.variety : ""}`];
+    const lines = [`${crop?.name ?? "Kultur"}${varietyText(p) ? " " + varietyText(p) : ""}`];
+    if (isMixed(p) && p.varieties.length > 1) {
+      const shown = p.varieties.slice(0, 12).map((v) => `${v.name} (${v.count})`);
+      if (p.varieties.length > 12) shown.push(`und ${p.varieties.length - 12} weitere`);
+      lines.push(shown.join(", "));
+    }
     lines.push(bed ? `${bed.name}, ${fmtNum(p.len)} × ${fmtNum(spanOf(p, bed))} m` : "Ohne Beet");
     lines.push(`Aussaat ${fmtDay(ph.sow)}${ph.plant != null ? `, Pflanzung ${fmtDay(ph.plant)}` : ""}`);
     lines.push(`Ernte ${fmtDay(ph.hs)} bis ${fmtDay(ph.he, { year: yearOf(ph.he) !== yearOf(ph.sow) })}`);

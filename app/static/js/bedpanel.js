@@ -2,7 +2,7 @@
 // Wird in der Seitenleiste der Karte und der Zeitleiste verwendet.
 import { state, find, patch } from "./store.js";
 import {
-  h, phases, mix, clamp, fmtDay, fmtNum, yearOf, yearStart, yearLength, round2, KIND_LABEL, PLANTABLE,
+  h, phases, mix, clamp, fmtDay, fmtNum, yearOf, yearStart, yearLength, round2, KIND_LABEL, PLANTABLE, varietyText,
 } from "./util.js";
 import { toast, icon } from "./ui.js";
 
@@ -76,8 +76,8 @@ export function bedUsage(bed, { onPlanting } = {}) {
         ? h("div", { class: "bed-timeline" }, thisYear.map((p) => {
           const c = find.crop(p.crop_id);
           return h("div", { class: "row" },
-            h("button", { type: "button", onclick: () => onPlanting?.(p), title: `${c?.name ?? ""} ${p.variety ?? ""}` },
-              c?.name ?? "Kultur", p.variety ? h("span", { class: "muted" }, ` ${p.variety}`) : null),
+            h("button", { type: "button", onclick: () => onPlanting?.(p), title: `${c?.name ?? ""} ${varietyText(p)}` },
+              c?.name ?? "Kultur", varietyText(p) ? h("span", { class: "muted" }, ` ${varietyText(p)}`) : null),
             miniTimeline(p, year));
         }))
         : h("p", { class: "muted small", style: { margin: 0 } }, "Noch nichts geplant.")),

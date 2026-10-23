@@ -3,7 +3,9 @@ import { state, find, select, patch, remove, setDay, setMode, issuesOf, api, rep
 import {
   h, s, phases, onBedAt, rectOf, spanOf, rowCount, plantCount, plantLayout, spacing, mix, clamp, snap, round2,
   fmtDay, fmtNum, yearOf, yearStart, yearLength, MONTHS_SHORT, KIND_LABEL, PLANTABLE, isoOf, plural,
+  isMixed, mixPlan, varietyColor, varietyMark, varietyText, textOn,
 } from "./util.js";
+import { mixLegend, downloadPlan } from "./mix.js";
 import {
   openPlantingEditor, openBedEditor, createBedRect, placeCrop, createSuccession, assignPlanting, DEFAULT_BED_SIZE,
 } from "./editor.js";
@@ -229,7 +231,7 @@ export function mountMap(root) {
     if (mode.type === "crop") what = find.crop(mode.id)?.name ?? what;
     else {
       const p = find.planting(mode.id);
-      what = p ? `${find.crop(p.crop_id)?.name ?? "den Satz"}${p.variety ? " " + p.variety : ""}` : "den Satz";
+      what = p ? `${find.crop(p.crop_id)?.name ?? "den Satz"}${varietyText(p) ? " " + varietyText(p) : ""}` : "den Satz";
     }
     hint.replaceChildren(h("span", {}, `Tippe auf ein Beet, um ${what} zu setzen`),
       h("button", { type: "button", class: "btn btn-sm", onclick: () => setMode(null) }, "Abbrechen"));
@@ -441,7 +443,7 @@ export function mountMap(root) {
     } else {
       g.append(s("rect", { x, y, width: w, height: hh, fill: mix(color, "#ffffff", 0.58), stroke: mix(color, "#1d2b24", 0.2),
         "stroke-width": 1.2, "vector-effect": "non-scaling-stroke" }));
-      g.append(drawPlants(p, crop, bed, x, y, w, hh, color));
+      g.append(drawPlants(p, crop, bed, x, y, w, hh, color, k));
     }
     if (conflict) {
       g.append(s("rect", { x, y, width: w, height: hh, fill: "none", stroke: "var(--alert)", "stroke-width": 3, "vector-effect": "non-scaling-stroke" }));
@@ -459,7 +461,7 @@ export function mountMap(root) {
       const name = crop?.name ?? "Kultur";
       const maxChars = Math.max(2, Math.floor((w - 2 * pad) / (fs * 0.47)));
       const clip = (t) => (t.length > maxChars ? t.slice(0, Math.max(1, maxChars - 1)) + "…" : t);
-      const sub = mode === "upcoming" ? `ab ${fmtDay(phases(p).fieldStart)}` : p.variety;
+      const sub = mode === "upcoming" ? `ab ${fmtDay(phases(p).fieldStart)}` : varietyText(p);
       const twoLines = sub && screenH >= 32;
       const t = s("text", { class: "pl-label", x: x + pad, y: y + pad + fs * 0.85,
         style: `font-size:${fs}px; stroke-width:${3.5 * k}px` }, clip(name));
@@ -472,7 +474,7 @@ export function mountMap(root) {
     return g;
   }
 
-  function drawPlants(p, crop, bed, x, y, w, hh, color) {
+  function drawPlants(p, crop, bed, x, y, w, hh, color, k) {
     const g = s("g", { "pointer-events": "none" });
     const { along, rows, perRow, sp } = plantLayout(p, crop, bed);
     const dark = mix(color, "#1d2b24", 0.1);
@@ -480,6 +482,41 @@ export function mountMap(root) {
     const at = (i, j) => (along === "x"
       ? [x + (w * (j + 0.5)) / perRow, y + (hh * (i + 0.5)) / rows]
       : [x + (w * (i + 0.5)) / rows, y + (hh * (j + 0.5)) / perRow]);
+    if (isMixed(p) && rows * perRow <= 3000) {
+      // Mischsatz: jede Pflanze in der Farbe ihrer Sorte, mit Kürzel wenn genug Platz
+      const plan = mixPlan(p, crop, bed);
+      const rad = clamp(Math.min(sp.row, sp.plant) * 0.38, 1.2, 55);
+      const showMark = rad / k >= 6.5;
+      g.removeAttribute("pointer-events");
+      for (const o of plan.order) {
+        const [cx, cy] = at(o.r, o.c);
+        if (o.v == null) {
+          g.append(s("circle", { cx, cy, r: rad * 0.8, fill: "none", stroke: dark, "stroke-width": 1, "stroke-dasharray": "2 2",
+            "vector-effect": "non-scaling-stroke", opacity: 0.6, "pointer-events": "none" }));
+          continue;
+        }
+        const vc = varietyColor(o.v);
+        const dot = s("g", {},
+          s("title", {}, `${p.varieties[o.v].name}, Reihe ${o.row}, Platz ${o.place}`),
+          s("circle", { cx, cy, r: rad, fill: vc, stroke: "#fff", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
+        if (showMark) {
+          dot.append(s("text", { x: cx, y: cy, "text-anchor": "middle", "dominant-baseline": "central", fill: textOn(vc),
+            "pointer-events": "none", transform: bed?.rotation ? `rotate(${-bed.rotation} ${cx} ${cy})` : null,
+            style: `font: 600 ${rad * 1.1}px var(--font-cond)` }, varietyMark(o.v)));
+        }
+        g.append(dot);
+      }
+      // ausgewählt: Pflanzweg und erste Pflanze hervorheben
+      if (state.sel?.type === "planting" && state.sel.id === p.id && plan.order.length > 1 && plan.order.length <= 800) {
+        const pts = plan.order.map((o) => at(o.r, o.c).map((v) => v.toFixed(1)).join(",")).join(" ");
+        g.prepend(s("polyline", { points: pts, fill: "none", stroke: "var(--ink)", "stroke-width": 1, "stroke-dasharray": "3 3",
+          "vector-effect": "non-scaling-stroke", opacity: 0.5, "pointer-events": "none" }));
+        const [sx, sy] = at(plan.order[0].r, plan.order[0].c);
+        g.append(s("circle", { cx: sx, cy: sy, r: rad * 1.5, fill: "none", stroke: "var(--ink)", "stroke-width": 2,
+          "vector-effect": "non-scaling-stroke", "pointer-events": "none" }));
+      }
+      return g;
+    }
     if (rows * perRow > 900) {
       const inset = 4;
       for (let i = 0; i < rows; i++) {
@@ -948,7 +985,7 @@ export function mountMap(root) {
       const c = find.crop(p.crop_id);
       return h("li", {}, h("button", { type: "button", onclick: () => select({ type: "planting", id: p.id }) },
         h("span", { class: "dot", style: { background: c?.color } }),
-        h("span", { class: "name" }, c?.name ?? "Kultur", p.variety ? h("span", { class: "muted" }, ` ${p.variety}`) : null),
+        h("span", { class: "name" }, c?.name ?? "Kultur", varietyText(p) ? h("span", { class: "muted" }, ` ${varietyText(p)}`) : null),
         h("span", { class: "when" }, when(p))));
     }));
 
@@ -1067,10 +1104,10 @@ export function mountMap(root) {
     const crop = find.crop(p.crop_id);
     const ph = phases(p);
     const active = state.mode?.type === "planting" && state.mode.id === p.id;
-    const name = `${crop?.name ?? "Satz"}${p.variety ? " " + p.variety : ""}`;
+    const name = `${crop?.name ?? "Satz"}${varietyText(p) ? " " + varietyText(p) : ""}`;
     const el = h("button", { type: "button", class: "orphan", "aria-pressed": active ? "true" : "false" },
       h("span", { class: "dot", style: { background: crop?.color } }),
-      h("span", { class: "name" }, crop?.name ?? "Satz", p.variety ? h("span", { class: "muted" }, ` ${p.variety}`) : null),
+      h("span", { class: "name" }, crop?.name ?? "Satz", varietyText(p) ? h("span", { class: "muted" }, ` ${varietyText(p)}`) : null),
       h("span", { class: "when" }, `${ph.plant != null ? "pflanzen" : "säen"} ${fmtDay(ph.fieldStart)}`),
       h("span", { class: "size" }, `${fmtNum(p.len)} m`));
     return draggable(el, {
@@ -1113,7 +1150,9 @@ export function mountMap(root) {
     const kv = h("dl", { class: "kv", style: { margin: 0 } },
       h("dt", {}, "Beet"), h("dd", {}, bed ? bed.name : "Ohne Beet"),
       h("dt", {}, "Fläche"), h("dd", {}, `${fmtNum(p.len)} × ${fmtNum(spanOf(p, bed))} m, ab ${fmtNum(p.start)} m`),
-      h("dt", {}, "Pflanzen"), h("dd", {}, `${plantCount(p, crop, bed)} in ${plural(rowCount(p, crop, bed), "Reihe", "Reihen")}`),
+      h("dt", {}, "Pflanzen"), h("dd", {}, isMixed(p)
+        ? `${mixPlan(p, crop, bed).total} auf ${plantCount(p, crop, bed)} Plätzen in ${plural(rowCount(p, crop, bed), "Reihe", "Reihen")}`
+        : `${plantCount(p, crop, bed)} in ${plural(rowCount(p, crop, bed), "Reihe", "Reihen")}`),
       h("dt", {}, "Abstände"), h("dd", {}, `${sp.row} × ${sp.plant} cm`),
       h("dt", {}, "Aussaat"), h("dd", {}, fmtDay(ph.sow, { year: true })),
       ph.plant != null ? h("dt", {}, "Pflanzung") : null, ph.plant != null ? h("dd", {}, fmtDay(ph.plant, { year: true })) : null,
@@ -1125,7 +1164,7 @@ export function mountMap(root) {
         h("h2", { style: { display: "flex", alignItems: "center", gap: "8px" } },
           h("span", { class: "dot", style: { background: crop?.color, width: "14px", height: "14px" } }), crop?.name ?? "Kultur"),
         h("button", { type: "button", class: "btn btn-sm", onclick: () => openPlantingEditor(p) }, icon("edit"), "Bearbeiten")),
-      p.variety ? h("p", { class: "muted", style: { margin: "-6px 0 0" } }, p.variety) : null,
+      varietyText(p) ? h("p", { class: "muted", style: { margin: "-6px 0 0" } }, varietyText(p)) : null,
       h("p", { class: "status-line", style: { margin: 0 } }, status),
       miniTimeline(p, year),
       !visible && bed ? h("div", {},
@@ -1141,6 +1180,13 @@ export function mountMap(root) {
         bed ? h("button", { type: "button", class: "btn btn-sm btn-quiet", onclick: () => select({ type: "bed", id: bed.id }) }, `${bed.name} zeigen`) : null,
         h("button", { type: "button", class: "btn btn-sm btn-danger", onclick: deleteSelected }, icon("trash"), "Löschen")),
     )];
+    if (isMixed(p)) {
+      out.push(section(
+        h("div", { class: "panel-title" }, h("h3", {}, "Sorten"),
+          h("button", { type: "button", class: "btn btn-sm btn-quiet", onclick: () => downloadPlan(p, crop, bed),
+            title: "Reihe, Platz und Sorte als Tabelle (CSV)" }, "Pflanzplan herunterladen")),
+        mixLegend(p, crop, bed)));
+    }
     return out;
   }
 

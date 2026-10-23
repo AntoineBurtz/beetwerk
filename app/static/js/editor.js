@@ -2,9 +2,10 @@
 import { state, find, create, patch, remove, issuesOf, api, replaceAll, select, emit, setMode, setDay } from "./store.js";
 import {
   h, dayNum, isoOf, datesFromCrop, rowCount, plantCount, spanOf, fmtNum, KIND_LABEL, PLANTABLE,
-  phases, rectOf, round2, clamp, plural, fmtDay,
+  phases, rectOf, round2, clamp, plural, fmtDay, isMixed, varietyText,
 } from "./util.js";
 import { toast, confirmDialog, icon } from "./ui.js";
+import { mixEditor } from "./mix.js";
 import { openGeoSetup } from "./geosetup.js";
 
 function shell(title, { onSubmit, extraHead } = {}) {
@@ -16,6 +17,10 @@ function shell(title, { onSubmit, extraHead } = {}) {
     h("div", { class: "dlg-head" }, h("h2", {}, title), extraHead),
     body, foot);
   body.append(errorBox);
+  // Leere Einträge (z. B. Knöpfe, die es nur beim Bearbeiten gibt) überspringen, sonst stünde dort "null"
+  for (const el of [body, foot]) {
+    el.append = (...children) => Element.prototype.append.apply(el, children.flat().filter((c) => c != null && c !== false));
+  }
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     errorBox.hidden = true;
@@ -80,6 +85,7 @@ export async function createSuccession(p, days = 14) {
     harvest_start: shift(p.harvest_start), harvest_end: shift(p.harvest_end),
     start: p.start, len: p.len, offset: p.offset, span: p.span, rows: p.rows,
     row_spacing: p.row_spacing, plant_spacing: p.plant_spacing, notes: "",
+    varieties: isMixed(p) ? p.varieties.map((v) => ({ ...v })) : [], fill: p.fill, fill_start: p.fill_start,
   };
   const bed = find.bed(p.bed_id);
   if (bed) {
@@ -99,14 +105,18 @@ export async function createSuccession(p, days = 14) {
 
 export function openPlantingEditor(planting, defaults = {}) {
   const isNew = !planting?.id;
-  const p = { method: "direct", variety: "", start: 0, len: 1, offset: 0, span: null, notes: "", ...planting, ...defaults };
+  const p = { method: "direct", variety: "", start: 0, len: 1, offset: 0, span: null, notes: "",
+    varieties: [], fill: "snake", fill_start: "tl", ...planting, ...defaults };
   const crops = [...state.crops].sort((a, b) => a.name.localeCompare(b.name, "de"));
 
   const cropSel = h("select", { name: "crop_id", required: true },
     isNew && !p.crop_id ? h("option", { value: "" }, "Kultur wählen") : null,
     crops.map((c) => h("option", { value: c.id, selected: c.id === p.crop_id }, c.name)));
   const varietyList = h("datalist", { id: "variety-list" });
-  const variety = h("input", { name: "variety", value: p.variety || "", list: "variety-list", autocomplete: "off", placeholder: "z. B. Ochsenherz" });
+  const variety = h("input", { name: "variety", value: p.variety || "", list: "variety-list", autocomplete: "off", placeholder: "z. B. Ochsenherz",
+    "aria-labelledby": "pl-variety-label" });
+  const mixedChk = h("input", { type: "checkbox", name: "mixed", checked: isMixed(p) });
+  const mixSummary = h("p", { class: "mix-summary" });
 
   const beds = state.beds.filter((b) => PLANTABLE.has(b.kind) || b.id === p.bed_id);
   const bedSel = h("select", { name: "bed_id" },
@@ -151,19 +161,55 @@ export function openPlantingEditor(planting, defaults = {}) {
     plantedLabel.hidden = !isTp;
     rowSp.placeholder = c ? `${c.row_spacing} (Kultur)` : "";
     plantSp.placeholder = c ? `${c.plant_spacing} (Kultur)` : "";
-    varietyList.replaceChildren(...[...new Set(state.plantings
-      .filter((q) => q.crop_id === c?.id && q.variety).map((q) => q.variety))].map((v) => h("option", { value: v })));
+    const known = new Set();
+    for (const q of state.plantings) {
+      if (q.crop_id !== c?.id) continue;
+      if (q.variety) known.add(q.variety);
+      if (isMixed(q)) q.varieties.forEach((v) => known.add(v.name));
+    }
+    varietyList.replaceChildren(...[...known].sort((a, b) => a.localeCompare(b, "de")).map((v) => h("option", { value: v })));
+    const mixed = mixedChk.checked;
+    variety.hidden = mixed;
+    mixSummary.hidden = !mixed;
+    mixEd.el.hidden = !mixed;
     const draft = currentDraft();
     if (c && draft.len > 0) {
       const b = bed();
       const sp = spanOf(draft, b);
+      const n = plantCount(draft, c, b);
       calc.replaceChildren(
-        h("strong", {}, `${plural(rowCount(draft, c, b), "Reihe", "Reihen")}, ${plural(plantCount(draft, c, b), "Pflanze", "Pflanzen")}`),
+        h("strong", {}, `${plural(rowCount(draft, c, b), "Reihe", "Reihen")}, ${mixed ? plural(n, "Platz", "Plätze") : plural(n, "Pflanze", "Pflanzen")}`),
         ` auf ${fmtNum(draft.len)} × ${fmtNum(sp)} m (${fmtNum(draft.len * sp)} m²)`);
     } else {
       calc.textContent = "";
     }
+    if (mixed) mixEd.refresh();
+    updateSummary();
   }
+
+  function updateSummary() {
+    const n = mixEd.names().length;
+    mixSummary.textContent = n ? `${plural(n, "Sorte", "Sorten")}, Liste weiter unten` : "Sorten weiter unten eintragen";
+  }
+
+  const mixEd = mixEditor(p, {
+    datalistId: "variety-list",
+    context: () => ({ p: { ...currentDraft(), start: num(start.value) ?? 0 }, crop: crop(), bed: bed() }),
+    onChange: updateSummary,
+    onFitLength: (m) => { len.value = fmtInput(m); refresh(); },
+  });
+  mixedChk.addEventListener("change", () => {
+    if (mixedChk.checked) {
+      mixEd.seed(variety.value.trim());
+      refresh();
+      mixEd.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      mixEd.focusFirst();
+    } else {
+      const names = mixEd.names();
+      if (names.length === 1 && !variety.value.trim()) variety.value = names[0];
+      refresh();
+    }
+  });
 
   function currentDraft() {
     return {
@@ -210,9 +256,11 @@ export function openPlantingEditor(planting, defaults = {}) {
   recalcBtn.addEventListener("click", () => recalc(false));
   let startTouched = !isNew;
   start.addEventListener("input", () => { startTouched = true; });
-  for (const el of [len, offset, span, rows, rowSp, plantSp, bedSel]) el.addEventListener("input", refresh);
+  for (const el of [len, offset, span, rows, rowSp, plantSp, bedSel, start]) el.addEventListener("input", refresh);
 
-  const title = isNew ? "Neuer Satz" : `${find.crop(p.crop_id)?.name ?? "Satz"}${p.variety ? " " + p.variety : ""}`;
+  const cropName = find.crop(p.crop_id)?.name ?? "Satz";
+  const title = isNew ? "Neuer Satz"
+    : isMixed(p) ? `${cropName} · ${varietyText(p)}` : `${cropName}${p.variety ? " " + p.variety : ""}`;
   const ui = shell(title, { onSubmit: save });
 
   async function save() {
@@ -228,9 +276,11 @@ export function openPlantingEditor(planting, defaults = {}) {
     }
     const draft = currentDraft();
     if (!(draft.len > 0)) throw new Error("Die Länge muss größer als 0 sein");
+    const mixed = mixedChk.checked ? mixEd.value() : { varieties: [], ...mixEd.settings() };
     const payload = {
       crop_id: c.id,
-      variety: variety.value.trim(),
+      variety: mixedChk.checked ? "" : variety.value.trim(),
+      ...mixed,
       bed_id: bedSel.value ? Number(bedSel.value) : null,
       method: m,
       sow_date: sow.value,
@@ -275,7 +325,10 @@ export function openPlantingEditor(planting, defaults = {}) {
   const issueList = isNew ? [] : issuesOf(p.id);
 
   ui.body.append(
-    h("div", { class: "grid-2" }, field("Kultur", cropSel), field("Sorte", variety), varietyList),
+    h("div", { class: "grid-2" }, field("Kultur", cropSel),
+      h("div", { class: "field" }, h("span", { id: "pl-variety-label" }, "Sorte"), variety, mixSummary,
+        h("label", { class: "check" }, mixedChk, "Mehrere Sorten (Mischsatz)")),
+      varietyList),
     h("div", { class: "grid-2 stack-sm" }, field("Beet", bedSel),
       h("div", { class: "field" }, h("span", {}, "Anbau"), methodSeg)),
     h("fieldset", {},
@@ -289,6 +342,7 @@ export function openPlantingEditor(planting, defaults = {}) {
       h("div", { class: "grid-3" },
         field("Reihenabstand (cm)", rowSp), field("Pflanzabstand (cm)", plantSp), field("Reihen", rows)),
       calc),
+    mixEd.el,
     h("fieldset", {},
       h("legend", {}, "Erledigt"),
       h("div", { style: { display: "flex", gap: "18px", flexWrap: "wrap" } },

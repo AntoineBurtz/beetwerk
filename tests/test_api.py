@@ -91,3 +91,53 @@ def test_ui_is_revalidated(client):
         assert "etag" in r.headers
         again = client.get(path, headers={"If-None-Match": r.headers["etag"]})
         assert again.status_code == 304
+
+
+def test_mixed_planting(client):
+    data = client.post("/api/demo?replace=true").json()
+    # Der Beispielgarten zeigt den Mischsatz gleich mit
+    demo_mixed = [p for p in data["plantings"] if p["varieties"]]
+    assert len(demo_mixed) == 2
+    assert all(p["variety"] == "" and isinstance(p["varieties"][0]["count"], int) for p in demo_mixed)
+    assert all(p["varieties"] == [] for p in data["plantings"] if p not in demo_mixed)
+    tomate = next(c for c in data["crops"] if c["name"] == "Tomate")
+    bed = data["beds"][0]
+    body = dict(crop_id=tomate["id"], bed_id=bed["id"], method="transplant", sow_date="2026-03-01",
+                plant_date="2026-05-01", harvest_start="2026-07-01", harvest_end="2026-09-30", len=4,
+                varieties=[{"name": " San Marzano ", "count": 7}, {"name": "Ochsenherz", "count": 5, "ref": "baserow:12"}],
+                fill="columns", fill_start="br")
+    r = client.post("/api/plantings", json=body)
+    assert r.status_code == 201, r.text
+    p = r.json()
+    assert p["varieties"] == [{"name": "San Marzano", "count": 7}, {"name": "Ochsenherz", "count": 5, "ref": "baserow:12"}]
+    assert (p["fill"], p["fill_start"]) == ("columns", "br")
+
+    # Reihenfolge ändern, zurück auf einfachen Satz
+    r = client.patch(f"/api/plantings/{p['id']}", json={"varieties": list(reversed(p["varieties"]))})
+    assert r.json()["varieties"][0]["name"] == "Ochsenherz"
+    assert client.patch(f"/api/plantings/{p['id']}", json={"varieties": [{"name": "X", "count": 0}]}).status_code == 422
+    assert client.patch(f"/api/plantings/{p['id']}", json={"fill_start": "xx"}).status_code == 422
+
+    listed = next(x for x in client.get("/api/data").json()["plantings"] if x["id"] == p["id"])
+    assert listed["varieties"][0]["name"] == "Ochsenherz"
+
+    # Sicherung behält die Sortenliste
+    exported = client.get("/api/export").json()
+    client.post("/api/import", json=exported)
+    again = next(x for x in client.get("/api/data").json()["plantings"] if x["id"] == p["id"])
+    assert [v["name"] for v in again["varieties"]] == ["Ochsenherz", "San Marzano"]
+
+    r = client.patch(f"/api/plantings/{p['id']}", json={"varieties": []})
+    assert r.json()["varieties"] == []
+
+
+def test_migration_adds_columns(tmp_path):
+    import sqlite3
+    from app import db as dbmod
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(dbmod.SCHEMA)
+    dbmod.migrate(conn)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(plantings)")}
+    assert {"varieties", "fill", "fill_start"} <= cols
+    dbmod.migrate(conn)  # zweimal ausführen schadet nicht

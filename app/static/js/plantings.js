@@ -2,6 +2,7 @@
 import { state, find, patch, select, issuesOf } from "./store.js";
 import {
   h, phases, fmtDay, fmtNum, yearOf, yearStart, yearLength, mix, clamp, spanOf, plantCount, rowCount, area,
+  isMixed, mixPlan, varietyText, varietyNames,
 } from "./util.js";
 import { openPlantingEditor } from "./editor.js";
 
@@ -82,7 +83,7 @@ export function mountPlantings(root) {
       h("span", { class: "verb" }, t.verb),
       h("span", { class: "what" },
         h("button", { type: "button", style: { all: "unset", cursor: "pointer" }, onclick: () => openPlantingEditor(t.p) },
-          c?.name ?? "Kultur", t.p.variety ? h("span", { class: "muted" }, ` ${t.p.variety}`) : null)),
+          c?.name ?? "Kultur", varietyText(t.p) ? h("span", { class: "muted" }, ` ${varietyText(t.p)}`) : null)),
       h("span", { class: "where" }, bed ? `${t.flag === "sown_done" && t.p.method === "transplant" ? "für " : ""}${bed.name}` : "Ohne Beet"));
   }
 
@@ -94,7 +95,7 @@ export function mountPlantings(root) {
     const rows = state.plantings
       .map((p) => ({ p, ph: phases(p), c: find.crop(p.crop_id), b: find.bed(p.bed_id) }))
       .filter(({ ph }) => ph.sow < ys + len && ph.he >= ys)
-      .filter(({ p, c, b }) => !q || [c?.name, p.variety, b?.name, c?.family].some((v) => (v || "").toLowerCase().includes(q)))
+      .filter(({ p, c, b }) => !q || [c?.name, varietyNames(p), b?.name, c?.family].some((v) => (v || "").toLowerCase().includes(q)))
       .sort((a, b) => a.ph.sow - b.ph.sow);
 
     const search = h("input", { class: "input", type: "search", placeholder: "Kultur, Sorte oder Beet", value: filter,
@@ -135,13 +136,15 @@ export function mountPlantings(root) {
           onkeydown: (e) => { if (e.key === "Enter") openPlantingEditor(p); },
         },
           h("td", {}, h("div", { class: "crop-cell" }, h("span", { class: "dot", style: { background: color } }),
-            h("span", {}, c?.name ?? "Kultur"), p.variety ? h("span", { class: "v" }, p.variety) : null)),
+            h("span", {}, c?.name ?? "Kultur"), varietyText(p)
+              ? h("span", { class: "v", title: isMixed(p) ? varietyNames(p) : null }, varietyText(p)) : null)),
           h("td", { class: "nowrap" }, b ? b.name : h("span", { class: "muted" }, "Ohne Beet")),
           h("td", { class: "nowrap num" }, fmtDay(ph.sow)),
           h("td", { class: "nowrap num" }, ph.plant != null ? fmtDay(ph.plant) : h("span", { class: "muted" }, "direkt")),
           h("td", { class: "nowrap num" }, `${fmtDay(ph.hs)} bis ${fmtDay(ph.he, { year: yearOf(ph.he) !== year })}`),
           h("td", { class: "r nowrap" }, `${fmtNum(area(p, b))} m²`),
-          h("td", { class: "r" }, plantCount(p, c, b)),
+          h("td", { class: "r", title: isMixed(p) ? `auf ${plantCount(p, c, b)} Plätzen` : null },
+            isMixed(p) ? mixPlan(p, c, b).total : plantCount(p, c, b)),
           h("td", { class: "tl-cell" }, mini),
           h("td", {}, issueKind ? h("span", { class: `issue-dot ${issueKind}`, title: issues.map((i) => i.text).join("\n") }, "!") : null));
       })));
@@ -157,15 +160,25 @@ export function mountPlantings(root) {
       if (yearOf(ph.sow) !== year) continue;
       const c = find.crop(p.crop_id);
       const b = find.bed(p.bed_id);
-      const key = `${p.crop_id}|${p.variety}`;
-      if (!groups.has(key)) groups.set(key, { c, variety: p.variety, sets: 0, meters: 0, area: 0, plants: 0, transplant: 0, rows: 0 });
-      const g = groups.get(key);
-      const n = plantCount(p, c, b);
-      g.sets += 1;
-      g.meters += p.len * rowCount(p, c, b);
-      g.area += p.len * spanOf(p, b);
-      g.plants += n;
-      if (p.method === "transplant") g.transplant += n;
+      const meters = p.len * rowCount(p, c, b);
+      const surface = p.len * spanOf(p, b);
+      // Mischsatz: jede Sorte mit ihrer Anzahl, Fläche anteilig
+      const parts = isMixed(p)
+        ? (() => {
+          const total = p.varieties.reduce((t, v) => t + v.count, 0) || 1;
+          return p.varieties.map((v) => ({ variety: v.name, plants: v.count, share: v.count / total }));
+        })()
+        : [{ variety: p.variety || "", plants: plantCount(p, c, b), share: 1 }];
+      for (const part of parts) {
+        const key = `${p.crop_id}|${part.variety}`;
+        if (!groups.has(key)) groups.set(key, { c, variety: part.variety, sets: 0, meters: 0, area: 0, plants: 0, transplant: 0, rows: 0 });
+        const g = groups.get(key);
+        g.sets += 1;
+        g.meters += meters * part.share;
+        g.area += surface * part.share;
+        g.plants += part.plants;
+        if (p.method === "transplant") g.transplant += part.plants;
+      }
     }
     const list = [...groups.values()].sort((a, b) => (a.c?.name || "").localeCompare(b.c?.name || "", "de") || a.variety.localeCompare(b.variety, "de"));
     const head = h("div", { class: "section-head" }, h("h2", {}, `Bedarf ${year}`),
