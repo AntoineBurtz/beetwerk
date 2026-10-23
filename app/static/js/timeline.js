@@ -4,23 +4,36 @@ import {
   h, phases, mix, textOn, clamp, fmtDay, fmtNum, isoOf, yearOf, yearStart, yearLength, isoWeek,
   MONTHS, MONTHS_SHORT, PLANTABLE, KIND_LABEL, spanOf, todayNum, dayNum, isMixed, varietyText,
 } from "./util.js";
-import { openPlantingEditor, openBedEditor, firstFreeStart } from "./editor.js";
+import { openPlantingEditor, openBedEditor, firstFreeStart, openSettings } from "./editor.js";
 import { iconBtn, icon, confirmDialog, replaceKeepingFocus } from "./ui.js";
 import { bedProperties, bedUsage } from "./bedpanel.js";
+import { weatherFor, weatherBand, weatherEnabled, WX_H } from "./weather.js";
 
 const ZOOMS = [1.3, 2, 3, 4.6, 7, 11];
 let zoomIdx = 2;
 let lastScroll = null; // { year, left, top }
+const HEAD_H = 46;
+
+function wxVisible() {
+  try { return localStorage.getItem("beetwerk.wx") !== "0"; } catch { return true; }
+}
 
 const LANE_H = 26;
 const ROW_PAD = 5;
 
 export function mountTimeline(root) {
   const zoomLabel = h("span", { class: "muted small num", style: { minWidth: "70px" } });
+  const wxToggle = h("button", { type: "button", class: "btn btn-sm btn-quiet wx-toggle", title: "Wetterband ein- oder ausblenden",
+    onclick: () => {
+      const on = !wxVisible();
+      try { localStorage.setItem("beetwerk.wx", on ? "1" : "0"); } catch { /* nur für diese Sitzung */ }
+      render();
+    } }, icon("drop"), "Wetter");
   const toolbar = h("div", { class: "toolbar" },
     iconBtn("minus", "Zeitachse stauchen", () => setZoom(zoomIdx - 1)),
     iconBtn("plus", "Zeitachse strecken", () => setZoom(zoomIdx + 1)),
     zoomLabel,
+    wxToggle,
     h("div", { class: "legend", "aria-hidden": "true" },
       h("span", {}, h("i", { class: "l-nursery" }), "Anzucht"),
       h("span", {}, h("i", { class: "l-field" }), "im Beet"),
@@ -60,6 +73,8 @@ export function mountTimeline(root) {
   }
 
   let geo = null; // aktuelle Geometrie: { year, ys, len, ppd, labelW }
+  let band = null; // Wetterband, solange sichtbar
+  const onWeather = () => { if (!drag) render(); };
   let drag = null;
   let frame = 0;
 
@@ -109,8 +124,19 @@ export function mountTimeline(root) {
       h("span", { title: "Stichtag verschieben" }, fmtDay(state.day))));
     scale.addEventListener("pointerdown", onScaleDown);
 
+    // Wetterband unter dem Kalenderkopf, bleibt beim Scrollen stehen
+    band?.hide();
+    band = null;
+    wxToggle.hidden = !weatherEnabled();
+    wxToggle.setAttribute("aria-pressed", String(wxVisible()));
+    if (weatherEnabled() && wxVisible()) {
+      band = weatherBand(geo, weatherFor(year, onWeather), { onSettings: () => openSettings() });
+    }
+    grid.style.setProperty("--head-h", `${HEAD_H + (band ? WX_H + 1 : 0)}px`);
     grid.append(h("div", { class: "tl-head" },
-      h("div", { class: "tl-corner", style: { width: `${labelW}px` } }, String(year)), scale));
+      h("div", { class: "tl-head-row" },
+        h("div", { class: "tl-corner", style: { width: `${labelW}px` } }, String(year)), scale),
+      band?.row));
 
     // Hintergrundlinien
     const bg = h("div", { class: "tl-bg", style: { left: `${labelW}px`, width: `${len * ppd}px` } });
@@ -387,6 +413,7 @@ export function mountTimeline(root) {
     const tag = scroll.querySelector(".tl-day-tag");
     if (line) line.style.left = `${geo.labelW + dayX}px`;
     if (tag) { tag.style.left = `${dayX}px`; tag.firstChild.textContent = fmtDay(state.day); }
+    band?.setDay(state.day);
     const viewLeft = scroll.scrollLeft, viewRight = viewLeft + scroll.clientWidth - geo.labelW;
     if (dayX < viewLeft + 10 || dayX > viewRight - 10) {
       scroll.scrollTo({ left: Math.max(0, dayX - (scroll.clientWidth - geo.labelW) * 0.35), behavior: "smooth" });
@@ -412,6 +439,7 @@ export function mountTimeline(root) {
       if (geo) lastScroll = { year: geo.year, left: scroll.scrollLeft, top: scroll.scrollTop };
       window.removeEventListener("resize", onResize);
       cancelAnimationFrame(frame);
+      band?.hide();
     },
   };
 }

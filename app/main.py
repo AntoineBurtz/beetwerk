@@ -16,13 +16,13 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import db, geo
+from . import db, geo, weather
 from .seed import seed_demo
 
 VERSION = "1.1.0"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 IMAGE_PATH = db.DATA_DIR / "imagery" / "garden.jpg"
-INTERNAL_SETTINGS = {"geo", "imagery_custom"}
+INTERNAL_SETTINGS = {"geo", "imagery_custom", *weather.STATE_KEYS}
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -155,6 +155,10 @@ class SettingsIn(BaseModel):
     garden_width: Optional[float] = Field(None, gt=0, le=1000)
     garden_height: Optional[float] = Field(None, gt=0, le=1000)
     rotation_years: Optional[int] = Field(None, ge=0, le=10)
+    weather_enabled: Optional[Literal["0", "1"]] = None
+    weather_soil: Optional[Literal["sand", "loamy_sand", "loam"]] = None
+    weather_lat: Optional[float] = Field(None, ge=-90, le=90)
+    weather_lon: Optional[float] = Field(None, ge=-180, le=180)
 
 
 class CustomSource(BaseModel):
@@ -445,11 +449,21 @@ def update_settings(body: SettingsIn):
         return {k: v for k, v in _settings(conn).items() if k not in INTERNAL_SETTINGS}
 
 
+# ---------------------------------------------------------------- Wetter
+
+@app.get("/api/weather")
+def weather_year(year: int, refresh: bool = False):
+    """Tageswerte (Niederschlag, Temperatur, Verdunstung) für ein Jahr, soweit vorhanden."""
+    if not 1950 <= year <= 2100:
+        _err(400, "Ungültiges Jahr")
+    return weather.year_data(year, force=refresh)
+
+
 @app.get("/api/export")
 def export_all():
     data = all_data()
     with db.session() as conn:
-        data["settings"] = _settings(conn)
+        data["settings"] = {k: v for k, v in _settings(conn).items() if k not in weather.STATE_KEYS}
     data.pop("geo", None)
     data.pop("imagery", None)
     data["format"] = "beetwerk"
@@ -473,6 +487,8 @@ async def import_all(request: Request):
         conn.execute("DELETE FROM settings")
         conn.execute("DELETE FROM sqlite_sequence")
         for key, value in (data.get("settings") or {}).items():
+            if key in weather.STATE_KEYS:
+                continue
             conn.execute("INSERT INTO settings(key, value) VALUES (?, ?)", (key, str(value)))
         for table in ("crops", "beds", "plantings"):
             cols = {r["name"] for r in db.rows(conn, f"PRAGMA table_info({table})")}

@@ -45,6 +45,7 @@ const ICONS = {
   parcel: "M4 6l7-3 6 5-2 9-10-2z",
   grip: "M5 7.5h10 M5 12.5h10",
   download: "M10 3v10 M6 9l4 4 4-4 M4 16h12",
+  drop: "M10 3c3.2 4.2 5 6.8 5 9.2a5 5 0 0 1-10 0C5 9.8 6.8 7.2 10 3z",
 };
 
 export function icon(name) {
