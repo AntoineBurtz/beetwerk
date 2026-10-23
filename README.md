@@ -16,7 +16,29 @@ Dazu gibt es:
 - Kulturenliste mit 36 Gemüsen als Startwerte (Anzucht, Kulturdauer, Abstände, Familie), frei anpassbar.
 - Folgesätze mit einem Klick, Rückgängig (Strg+Z), JSON-Sicherung.
 - Grundstück auf dem Luftbild: Grenze einzeichnen, Beete liegen am echten Ort, Luftbild hinter den Beeten ein- und ausblenden.
+- Wetterband in der Zeitleiste: Regen, Frost und Wasserbilanz mit empfohlenen Gießtagen (Daten von Open-Meteo).
 - Mischsatz: viele Sorten einer Kultur (z. B. 15 Tomatensorten zu je 4 bis 10 Pflanzen) als ein Satz, mit Sortenliste, Pflanzschema und Pflanzplan zum Herunterladen.
+
+## Wetter und Gießen
+
+Unter dem Kalenderkopf der Zeitleiste liegt ein Wetterband. Es bleibt beim Scrollen durch die Beete stehen und lässt sich mit „Wetter“ in der Werkzeugleiste ausblenden.
+
+- **Regen** pro Tag als Balken (gekappt bei 20 mm). Die nächsten 16 Tage sind Vorhersage und heller hinterlegt.
+- **Frost:** violette Marken oben für Tage mit Tiefstwert unter 0 °C.
+- **Wasserbilanz** als Streifen: Grün = feucht, Gelb = trocknet ab, orange Marken = Gießtage.
+- Überfahren oder Antippen eines Tages zeigt Regen, Temperatur, Verdunstung und Defizit. Links steht der Stand am Stichtag, z. B. „gießen in 2 Tagen“.
+
+Die Wasserbilanz rechnet wie ein Bodenspeicher: Die Verdunstung (ET₀ nach FAO) zehrt, Regen füllt auf. Erreicht das Defizit die Schwelle, ist das ein Gießtag. Danach rechnet Beetwerk so weiter, als wäre wie empfohlen gegossen worden. Schwelle und Menge folgen dem Prinzip der Geisenheimer Bewässerungssteuerung (gießen bei 60 % der nutzbaren Feldkapazität, auffüllen auf 90 %) und hängen vom Boden ab, einstellbar unter Einstellungen → Wetter:
+
+| Boden | Gießen ab Defizit | Menge |
+|---|---|---|
+| Sand | 12 mm | etwa 9 l/m² |
+| lehmiger Sand | 18 mm | etwa 14 l/m² |
+| Lehm oder Schluff | 24 mm | etwa 18 l/m² |
+
+Das sind Richtwerte für 30 cm Wurzeltiefe und einen geschlossenen Bestand. Folientunnel und Gewächshaus bekommen keinen Regen, für sie gilt das Band nicht.
+
+**Datenquelle:** Der Server holt die Tageswerte bei [Open-Meteo](https://open-meteo.com) (Lizenz CC BY 4.0) und speichert sie. Die letzten 92 Tage und die Vorhersage werden höchstens alle drei Stunden neu geladen, ältere Tage nur einmal aus dem Archiv. Als Standort dient die Mitte des Grundstücks, auf 0,01° (rund 1 km) gerundet. Ohne Grundstück auf dem Luftbild lässt sich der Standort in den Einstellungen eintragen. Für private Nutzung ist Open-Meteo kostenlos und braucht keinen Schlüssel; unter Einstellungen → Wetter lässt sich der Abruf abschalten.
 
 ## Mischsatz
 
@@ -149,6 +171,7 @@ Die REST-API ist unter `/api/docs` dokumentiert. Wichtige Endpunkte:
 - `POST/PATCH/DELETE /api/beds`, `/api/crops`, `/api/plantings`
 - `GET /api/export`, `POST /api/import` für JSON-Sicherungen
 - `POST /api/demo?replace=true` lädt den Beispielgarten
+- `GET /api/weather?year=2026` liefert die gespeicherten Tageswerte (Niederschlag, Tiefst- und Höchsttemperatur, ET₀, Vorhersage ja/nein) und lädt bei Bedarf nach
 
 Ein Mischsatz trägt `varieties` (Liste aus `{"name", "count", "ref"}`), `fill` (`snake` oder `columns`) und `fill_start` (`tl`, `tr`, `bl`, `br`). Eine leere Liste macht ihn wieder zum normalen Satz mit `variety`.
 

@@ -67,6 +67,17 @@ CREATE TABLE IF NOT EXISTS plantings (
     notes         TEXT    NOT NULL DEFAULT ''
 );
 
+-- Tageswerte von Open-Meteo als Zwischenspeicher, jederzeit neu abrufbar
+CREATE TABLE IF NOT EXISTS weather_days (
+    day        TEXT PRIMARY KEY,
+    precip     REAL,
+    tmin       REAL,
+    tmax       REAL,
+    et0        REAL,
+    forecast   INTEGER NOT NULL DEFAULT 0,
+    fetched_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS plantings_bed  ON plantings(bed_id);
 CREATE INDEX IF NOT EXISTS plantings_crop ON plantings(crop_id);
 """

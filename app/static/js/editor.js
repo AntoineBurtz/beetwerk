@@ -6,6 +6,7 @@ import {
 } from "./util.js";
 import { toast, confirmDialog, icon } from "./ui.js";
 import { mixEditor } from "./mix.js";
+import { SOILS, soilOf } from "./weather.js";
 import { openGeoSetup } from "./geosetup.js";
 
 function shell(title, { onSubmit, extraHead } = {}) {
@@ -531,13 +532,37 @@ export function openSettings() {
   const height = h("input", { name: "garden_height", inputmode: "decimal", value: fmtInput(Number(s.garden_height || 11)) });
   const years = h("input", { name: "rotation_years", inputmode: "numeric", value: s.rotation_years ?? 3 });
   const file = h("input", { type: "file", accept: "application/json,.json", hidden: true });
+  const wxOn = h("input", { type: "checkbox", name: "weather_enabled", checked: s.weather_enabled !== "0" });
+  const soilSel = h("select", { name: "weather_soil" },
+    Object.entries(SOILS).map(([id, so]) => h("option", { value: id, selected: (s.weather_soil || "loamy_sand") === id }, so.label)));
+  const soilHint = h("span", { class: "hint" });
+  const showSoil = () => {
+    const so = soilOf({ weather_soil: soilSel.value });
+    soilHint.textContent = `Gießen ab etwa ${fmtNum(so.threshold, 0)} mm Defizit, dann rund ${fmtNum(so.refill, 0)} l/m². Richtwerte für 30 cm Wurzeltiefe.`;
+  };
+  soilSel.addEventListener("change", showSoil);
+  showSoil();
+  const lat = h("input", { name: "weather_lat", inputmode: "decimal", placeholder: "z. B. 48,37",
+    value: s.weather_lat ? fmtInput(Number(s.weather_lat)) : "" });
+  const lon = h("input", { name: "weather_lon", inputmode: "decimal", placeholder: "z. B. 10,90",
+    value: s.weather_lon ? fmtInput(Number(s.weather_lon)) : "" });
 
   const ui = shell("Einstellungen", {
     onSubmit: async () => {
       const payload = {
         garden_name: name.value.trim() || "Mein Garten",
         rotation_years: Math.round(num(years.value) ?? 3),
+        weather_enabled: wxOn.checked ? "1" : "0",
+        weather_soil: soilSel.value,
       };
+      if (!geo && (lat.value.trim() || lon.value.trim())) {
+        const la = num(lat.value), lo = num(lon.value);
+        if (la == null || lo == null || Math.abs(la) > 90 || Math.abs(lo) > 180) {
+          throw new Error("Für den Wetter-Standort bitte Breite und Länge als Zahl angeben, z. B. 48,37 und 10,90");
+        }
+        payload.weather_lat = la;
+        payload.weather_lon = lo;
+      }
       if (!geo) {
         payload.garden_width = num(width.value);
         payload.garden_height = num(height.value);
@@ -617,9 +642,24 @@ export function openSettings() {
     } catch (e) { ui.showError(e.message); }
   };
 
+  const weatherSection = h("fieldset", {},
+    h("legend", {}, "Wetter"),
+    h("label", { class: "check" }, wxOn, "Wetterdaten von Open-Meteo laden"),
+    h("p", { class: "muted small", style: { margin: 0 } },
+      "Regen, Temperatur und Verdunstung für das Wetterband in der Zeitleiste. Dein Server fragt dafür bei Open-Meteo an, "
+      + "mit dem Standort auf etwa 1 km gerundet. ",
+      h("a", { href: "https://open-meteo.com/", target: "_blank", rel: "noopener" }, "Wetterdaten: Open-Meteo.com (CC BY 4.0)")),
+    geo
+      ? h("p", { class: "muted small", style: { margin: 0 } }, "Standort: Mitte des Grundstücks.")
+      : h("div", { class: "grid-2" },
+        field("Breite (° Nord)", lat), field("Länge (° Ost)", lon,
+          "Genauer und bequemer: das Grundstück auf dem Luftbild festlegen.")),
+    field("Boden im Garten", soilSel, soilHint));
+
   ui.body.append(
     field("Name des Gartens", name),
     groundSection,
+    weatherSection,
     field("Anbaupause für die Fruchtfolge (Jahre)", years,
       "Gleiche Pflanzenfamilie an gleicher Stelle innerhalb dieser Zeit wird markiert. 0 schaltet die Prüfung ab."),
     h("fieldset", {},
