@@ -32,6 +32,11 @@ STATE_KEYS = ("weather_loc", "weather_fetched_at")  # interner Zustand, gehört 
 
 # Letzter Archivabruf je Jahr; fehlen danach noch Tage, wird erst nach REFRESH wieder gefragt
 _archive_tries: dict[int, datetime] = {}
+_climate_tries: dict[tuple[int, int], datetime] = {}
+
+CLIMATE_YEARS = 20                 # so viele abgeschlossene Jahre zählen für die Froststatistik
+CLIMATE_MODEL = "era5_land"        # Reanalyse mit rund 9 km Auflösung, über die Jahre einheitlich
+FROST_THRESHOLDS = (-2.0, 0.0, 2.0)
 
 
 class WeatherError(Exception):
@@ -108,26 +113,41 @@ def _set(key: str, value: str) -> None:
                      "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
 
 
-def year_data(year: int, force: bool = False) -> dict:
+def _read_settings() -> dict:
     with db.session() as conn:
-        settings = {r["key"]: r["value"] for r in db.rows(conn, "SELECT key, value FROM settings")}
-    base = {"year": year, "attribution": ATTRIBUTION, "days": [], "error": None,
-            "soil": settings.get("weather_soil", "loamy_sand")}
+        return {r["key"]: r["value"] for r in db.rows(conn, "SELECT key, value FROM settings")}
+
+
+def _prepare(settings: dict) -> tuple[str, tuple[float, float] | None]:
+    """Status ("off", "no_location", "ok") und Standort; verwirft Gespeichertes bei neuem Ort."""
     if settings.get("weather_enabled", "1") == "0":
-        return {**base, "status": "off"}
+        return "off", None
     loc = location(settings)
     if not loc:
-        return {**base, "status": "no_location"}
-    lat, lon = loc
-    key = f"{lat:.2f},{lon:.2f}"
+        return "no_location", None
+    key = f"{loc[0]:.2f},{loc[1]:.2f}"
     if settings.get("weather_loc") != key:
         # Neuer Standort: alles Gespeicherte gehört zu einem anderen Ort
         with db.session() as conn:
             conn.execute("DELETE FROM weather_days")
+            conn.execute("DELETE FROM climate_days")
         _set("weather_loc", key)
         _set("weather_fetched_at", "")
+        settings["weather_loc"] = key
         settings["weather_fetched_at"] = ""
         _archive_tries.clear()
+        _climate_tries.clear()
+    return "ok", loc
+
+
+def year_data(year: int, force: bool = False) -> dict:
+    settings = _read_settings()
+    base = {"year": year, "attribution": ATTRIBUTION, "days": [], "error": None,
+            "soil": settings.get("weather_soil", "loamy_sand")}
+    status, loc = _prepare(settings)
+    if status != "ok":
+        return {**base, "status": status}
+    lat, lon = loc
 
     t = today()
     first, last = date(year, 1, 1), date(year, 12, 31)
@@ -187,3 +207,122 @@ def year_data(year: int, force: bool = False) -> dict:
     return {**base, "status": "ok", "location": {"lat": lat, "lon": lon}, "today": t.isoformat(),
             "fetched_at": fetched[0] if fetched else None, "days": days,
             "error": errors[0] if errors else None}
+
+
+# ---------------------------------------------------------------- Frostdaten
+
+def _norm(d: date) -> int:
+    """Tag im Jahr (0 = 1. Januar) in einem Jahr ohne Schalttag, damit Jahre vergleichbar sind."""
+    day = min(d.day, 28) if d.month == 2 else d.day
+    return (date(2001, d.month, day) - date(2001, 1, 1)).days
+
+
+def _mmdd(n: int | None) -> str | None:
+    return None if n is None else (date(2001, 1, 1) + timedelta(days=n)).strftime("%m-%d")
+
+
+def frost_dates(tmins: dict[date, float], year: int, threshold: float) -> tuple[date | None, date | None]:
+    """Letzter Frost im Frühjahr (bis Ende Juli) und erster Frost im Herbst (ab August)."""
+    spring = [d for d, t in tmins.items() if d.year == year and d.month <= 7 and t is not None and t <= threshold]
+    autumn = [d for d, t in tmins.items() if d.year == year and d.month >= 8 and t is not None and t <= threshold]
+    return (max(spring) if spring else None), (min(autumn) if autumn else None)
+
+
+def frost_stats(springs: list[int | None], autumns: list[int | None]) -> dict:
+    """Aus den Frosttagen der einzelnen Jahre: Median und die Tage mit nur noch 10 % Risiko.
+
+    springs: letzter Frosttag je Jahr (None = kein Frost im Frühjahr), autumns: erster Frosttag
+    (None = kein Frost bis Jahresende). Alles als Tag im Jahr ohne Schalttag.
+    """
+    n = len(springs)
+    if not n:
+        return {}
+
+    def spring_risk(d):  # Anteil der Jahre, in denen nach Tag d noch Frost kam
+        return sum(1 for s in springs if s is not None and s > d) / n
+
+    def autumn_risk(d):  # Anteil der Jahre, in denen bis Tag d schon Frost war
+        return sum(1 for a in autumns if a is not None and a <= d) / n
+
+    days = range(365)
+    spring_median = next(d for d in days if spring_risk(d) <= 0.5)
+    spring_safe = next(d for d in days if spring_risk(d) <= 0.1)
+    autumn_median = next((d for d in days if autumn_risk(d) >= 0.5), None)
+    autumn_safe = max((d for d in days if autumn_risk(d) <= 0.1 and d >= 182), default=None)
+    sp = [s for s in springs if s is not None]
+    au = [a for a in autumns if a is not None]
+    free = [a - s for s, a in zip(springs, autumns) if s is not None and a is not None]
+    return {
+        "spring_median": _mmdd(spring_median),
+        "spring_safe": _mmdd(spring_safe),          # danach Frost nur noch in höchstens 10 % der Jahre
+        "spring_earliest": _mmdd(min(sp)) if sp else None,
+        "spring_latest": _mmdd(max(sp)) if sp else None,
+        "autumn_median": _mmdd(autumn_median),
+        "autumn_safe": _mmdd(autumn_safe),          # bis dahin Frost in höchstens 10 % der Jahre
+        "autumn_earliest": _mmdd(min(au)) if au else None,
+        "autumn_latest": _mmdd(max(au)) if au else None,
+        "frost_free_median": sorted(free)[len(free) // 2] if free else None,
+    }
+
+
+def _climate_rows(first: date, last: date) -> dict[date, float]:
+    with db.session() as conn:
+        rows = db.rows(conn, "SELECT day, tmin FROM climate_days WHERE day BETWEEN ? AND ?",
+                       (first.isoformat(), last.isoformat()))
+    return {date.fromisoformat(r["day"]): r["tmin"] for r in rows}
+
+
+def frost_data(threshold: float | None = None) -> dict:
+    settings = _read_settings()
+    if threshold is None:
+        try:
+            threshold = float(settings.get("weather_frost", "0"))
+        except ValueError:
+            threshold = 0.0
+    t = today()
+    y0, y1 = t.year - CLIMATE_YEARS, t.year - 1
+    base = {"attribution": ATTRIBUTION, "threshold": threshold, "years": [y0, y1], "error": None}
+    status, loc = _prepare(settings)
+    if status != "ok":
+        return {**base, "status": status}
+    lat, lon = loc
+    first, last = date(y0, 1, 1), date(y1, 12, 31)
+    tmins = _climate_rows(first, last)
+    expected = (last - first).days + 1
+    key = (y0, y1)
+    tried = _climate_tries.get(key)
+    error = None
+    if len(tmins) < expected * 0.98 and (tried is None or now() - tried > REFRESH):
+        _climate_tries[key] = now()
+        params = {"latitude": lat, "longitude": lon, "daily": "temperature_2m_min", "timezone": "auto",
+                  "start_date": first.isoformat(), "end_date": last.isoformat()}
+        payload = None
+        try:
+            payload = _fetch_json(ARCHIVE_URL, {**params, "models": CLIMATE_MODEL})
+        except WeatherError:
+            try:  # falls das Modell nicht angeboten wird: Standardauswahl von Open-Meteo
+                payload = _fetch_json(ARCHIVE_URL, params)
+            except WeatherError as exc:
+                error = str(exc)
+        if payload:
+            d = payload.get("daily") or {}
+            pairs = [(day, v) for day, v in zip(d.get("time") or [], d.get("temperature_2m_min") or []) if v is not None]
+            with db.session() as conn:
+                conn.executemany("INSERT INTO climate_days(day, tmin) VALUES (?, ?) "
+                                 "ON CONFLICT(day) DO UPDATE SET tmin = excluded.tmin", pairs)
+            tmins = _climate_rows(first, last)
+    years = sorted({d.year for d in tmins})
+    # Nur vollständige Jahre zählen
+    years = [y for y in years if sum(1 for d in tmins if d.year == y) >= 360]
+    if not years:
+        return {**base, "status": "ok", "per_year": [], "stats": {}, "error": error or "Keine Temperaturdaten im Archiv"}
+    per_year, springs, autumns = [], [], []
+    for y in years:
+        sp, au = frost_dates(tmins, y, threshold)
+        per_year.append({"year": y, "spring": sp.isoformat() if sp else None, "autumn": au.isoformat() if au else None})
+        springs.append(_norm(sp) if sp else None)
+        autumns.append(_norm(au) if au else None)
+    return {**base, "status": "ok", "years": [years[0], years[-1]], "n": len(years),
+            "location": {"lat": lat, "lon": lon},
+            "per_year": per_year, "spring": [_mmdd(v) for v in springs], "autumn": [_mmdd(v) for v in autumns],
+            "stats": frost_stats(springs, autumns), "error": error}

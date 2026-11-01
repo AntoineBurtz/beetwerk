@@ -78,6 +78,12 @@ CREATE TABLE IF NOT EXISTS weather_days (
     fetched_at TEXT NOT NULL
 );
 
+-- Tiefstwerte vergangener Jahre für die Froststatistik (Open-Meteo-Archiv)
+CREATE TABLE IF NOT EXISTS climate_days (
+    day  TEXT PRIMARY KEY,
+    tmin REAL
+);
+
 CREATE INDEX IF NOT EXISTS plantings_bed  ON plantings(bed_id);
 CREATE INDEX IF NOT EXISTS plantings_crop ON plantings(crop_id);
 """

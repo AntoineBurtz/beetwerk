@@ -7,7 +7,7 @@ import {
 import { openPlantingEditor, openBedEditor, firstFreeStart, openSettings } from "./editor.js";
 import { iconBtn, icon, confirmDialog, replaceKeepingFocus } from "./ui.js";
 import { bedProperties, bedUsage } from "./bedpanel.js";
-import { weatherFor, weatherBand, weatherEnabled, WX_H } from "./weather.js";
+import { weatherFor, weatherBand, weatherEnabled, frostFor, frostModel, frostOverlay, WX_H } from "./weather.js";
 
 const ZOOMS = [1.3, 2, 3, 4.6, 7, 11];
 let zoomIdx = 2;
@@ -129,8 +129,9 @@ export function mountTimeline(root) {
     band = null;
     wxToggle.hidden = !weatherEnabled();
     wxToggle.setAttribute("aria-pressed", String(wxVisible()));
+    const fm = weatherEnabled() ? frostModel(frostFor(onWeather), year) : null;
     if (weatherEnabled() && wxVisible()) {
-      band = weatherBand(geo, weatherFor(year, onWeather), { onSettings: () => openSettings() });
+      band = weatherBand(geo, weatherFor(year, onWeather), { onSettings: () => openSettings(), frost: fm });
     }
     grid.style.setProperty("--head-h", `${HEAD_H + (band ? WX_H + 1 : 0)}px`);
     grid.append(h("div", { class: "tl-head" },
@@ -145,6 +146,7 @@ export function mountTimeline(root) {
       bg.append(h("div", { class: "mline", style: { left: `${a * ppd}px` } }));
     }
     if (weekW >= 16) for (let d = firstMonday; d < ys + len; d += 7) bg.append(h("div", { class: "wline", style: { left: `${(d - ys) * ppd}px` } }));
+    if (fm) bg.prepend(frostOverlay(geo, fm));
     grid.append(bg);
 
     // Zeilen

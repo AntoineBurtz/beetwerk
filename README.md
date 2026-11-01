@@ -38,6 +38,16 @@ Die Wasserbilanz rechnet wie ein Bodenspeicher: Die Verdunstung (ET₀ nach FAO)
 
 Das sind Richtwerte für 30 cm Wurzeltiefe und einen geschlossenen Bestand. Folientunnel und Gewächshaus bekommen keinen Regen, für sie gilt das Band nicht.
 
+### Frosttermine
+
+Aus den Tiefstwerten der letzten 20 abgeschlossenen Jahre an deinem Standort ermittelt Beetwerk je Jahr den letzten Frost im Frühjahr (bis Ende Juli) und den ersten im Herbst (ab August). Daraus entsteht eine Statistik, keine Wettervorhersage:
+
+- In der Zeitleiste liegt hinter den Beeten eine violette Schattierung. Je kräftiger sie ist, in desto mehr Jahren gab es an diesem Tag oder später (Frühjahr) bzw. bis zu diesem Tag (Herbst) Frost. Die gestrichelten Linien markieren die mittleren Termine; im Wetterband stehen sie als „Ø letzter Frost“ und „Ø erster Frost“.
+- Überfahren oder Antippen eines Tages zeigt z. B. „Frost an diesem Tag oder später noch in 3 von 20 Jahren“, auch für kommende Jahre.
+- Unter Einstellungen → Wetter steht die Zusammenfassung, etwa „in 18 von 20 Jahren bis 7. Mai vorbei“. Dort lässt sich auch die Frostgrenze wählen: 0 °C, +2 °C (vorsichtig, Bodenfrost möglich) oder −2 °C.
+
+Die Werte stammen aus der Reanalyse ERA5-Land (rund 9 km Raster, 2 m Höhe) über das Open-Meteo-Archiv. Sie werden einmal geladen und gespeichert. In Senken und direkt über dem Boden ist es in klaren Nächten oft kälter, dafür ist die Einstellung +2 °C gedacht.
+
 **Datenquelle:** Der Server holt die Tageswerte bei [Open-Meteo](https://open-meteo.com) (Lizenz CC BY 4.0) und speichert sie. Die letzten 92 Tage und die Vorhersage werden höchstens alle drei Stunden neu geladen, ältere Tage nur einmal aus dem Archiv. Als Standort dient die Mitte des Grundstücks, auf 0,01° (rund 1 km) gerundet. Ohne Grundstück auf dem Luftbild lässt sich der Standort in den Einstellungen eintragen. Für private Nutzung ist Open-Meteo kostenlos und braucht keinen Schlüssel; unter Einstellungen → Wetter lässt sich der Abruf abschalten.
 
 ## Mischsatz
@@ -171,6 +181,7 @@ Die REST-API ist unter `/api/docs` dokumentiert. Wichtige Endpunkte:
 - `POST/PATCH/DELETE /api/beds`, `/api/crops`, `/api/plantings`
 - `GET /api/export`, `POST /api/import` für JSON-Sicherungen
 - `POST /api/demo?replace=true` lädt den Beispielgarten
+- `GET /api/frost?threshold=0` liefert je Jahr den letzten und ersten Frosttag der letzten 20 Jahre samt Statistik
 - `GET /api/weather?year=2026` liefert die gespeicherten Tageswerte (Niederschlag, Tiefst- und Höchsttemperatur, ET₀, Vorhersage ja/nein) und lädt bei Bedarf nach
 
 Ein Mischsatz trägt `varieties` (Liste aus `{"name", "count", "ref"}`), `fill` (`snake` oder `columns`) und `fill_start` (`tl`, `tr`, `bl`, `br`). Eine leere Liste macht ihn wieder zum normalen Satz mit `variety`.

@@ -157,6 +157,7 @@ class SettingsIn(BaseModel):
     rotation_years: Optional[int] = Field(None, ge=0, le=10)
     weather_enabled: Optional[Literal["0", "1"]] = None
     weather_soil: Optional[Literal["sand", "loamy_sand", "loam"]] = None
+    weather_frost: Optional[Literal["-2", "0", "2"]] = None
     weather_lat: Optional[float] = Field(None, ge=-90, le=90)
     weather_lon: Optional[float] = Field(None, ge=-180, le=180)
 
@@ -457,6 +458,14 @@ def weather_year(year: int, refresh: bool = False):
     if not 1950 <= year <= 2100:
         _err(400, "Ungültiges Jahr")
     return weather.year_data(year, force=refresh)
+
+
+@app.get("/api/frost")
+def frost(threshold: Optional[float] = None):
+    """Letzter Frost im Frühjahr und erster im Herbst für die letzten 20 Jahre, mit Statistik."""
+    if threshold is not None and threshold not in weather.FROST_THRESHOLDS:
+        _err(400, "Frostgrenze muss -2, 0 oder 2 °C sein")
+    return weather.frost_data(threshold)
 
 
 @app.get("/api/export")

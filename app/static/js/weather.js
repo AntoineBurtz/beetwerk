@@ -1,7 +1,7 @@
 // Wetter in der Zeitleiste: Regen, Frost und Wasserbilanz. Daten von Open-Meteo (CC BY 4.0),
 // abgerufen und zwischengespeichert vom eigenen Server.
 import { state, api } from "./store.js";
-import { h, s, dayNum, fmtDayLong, fmtNum, clamp } from "./util.js";
+import { h, s, dayNum, fmtDay, fmtDayLong, fmtNum, clamp } from "./util.js";
 
 export const WX_H = 44;
 const RAIN_TOP = 7;     // Platz oben für Frostmarken
@@ -63,9 +63,7 @@ export function weatherEnabled() {
 }
 
 // Liefert, was schon da ist (oder null), und lädt bei Bedarf nach; onLoad meldet neue Daten.
-export function weatherFor(year, onLoad) {
-  if (!weatherEnabled()) return { status: "off", days: [] };
-  const key = cacheKey(year);
+function load(key, url, onLoad, onError) {
   let entry = cache.get(key);
   if (!entry || (!entry.loading && Date.now() - entry.at > MAX_AGE)) {
     entry = { data: entry?.data ?? null, at: entry?.at ?? 0, loading: true, waiters: new Set() };
@@ -76,12 +74,121 @@ export function weatherFor(year, onLoad) {
       entry.waiters.clear();
       for (const fn of waiters) fn();
     };
-    api.get(`/api/weather?year=${year}`)
-      .then(done)
-      .catch((err) => done(entry.data ?? { status: "error", error: err.message, days: [] }));
+    api.get(url).then(done).catch((err) => done(entry.data ?? onError(err)));
   }
   if (entry.loading && onLoad) entry.waiters.add(onLoad);
   return entry.data;
+}
+
+export function weatherFor(year, onLoad) {
+  if (!weatherEnabled()) return { status: "off", days: [] };
+  return load(`w|${cacheKey(year)}`, `/api/weather?year=${year}`, onLoad,
+    (err) => ({ status: "error", error: err.message, days: [] }));
+}
+
+// ---------------------------------------------------------------- Frost: letzte und erste Frosttage der Vorjahre
+
+export const FROST_COLOR = "#7b62c9";
+export const FROST_OPTIONS = [
+  ["0", "0 °C – Frost in 2 m Höhe"],
+  ["2", "+2 °C – vorsichtig, Bodenfrost möglich"],
+  ["-2", "−2 °C – nur stärkerer Frost"],
+];
+
+export function frostFor(onLoad) {
+  if (!weatherEnabled()) return { status: "off" };
+  const th = state.settings.weather_frost ?? "0";
+  return load(`f|${cacheKey("")}|${th}`, `/api/frost?threshold=${th}`, onLoad,
+    (err) => ({ status: "error", error: err.message }));
+}
+
+// Frostdaten auf ein bestimmtes Jahr übertragen; null, wenn (noch) nichts da ist
+export function frostModel(frost, year) {
+  if (frost?.status !== "ok" || !frost.n || !frost.stats?.spring_median) return null;
+  const at = (mmdd) => (mmdd ? dayNum(`${year}-${mmdd}`) : null);
+  const springs = frost.spring.map(at);
+  const autumns = frost.autumn.map(at);
+  const st = frost.stats;
+  const mid = dayNum(`${year}-07-31`);
+  return {
+    n: frost.n,
+    years: frost.years,
+    threshold: frost.threshold,
+    // Zahl der Jahre mit Frost an diesem Tag oder später (Frühjahr) bzw. bis zu diesem Tag (Herbst)
+    count: (d) => (d <= mid
+      ? springs.filter((v) => v != null && v >= d).length
+      : autumns.filter((v) => v != null && v <= d).length),
+    spring: at(st.spring_median),
+    springSafe: at(st.spring_safe),
+    springLatest: at(st.spring_latest),
+    autumn: at(st.autumn_median),
+    autumnSafe: at(st.autumn_safe),
+    autumnEarliest: at(st.autumn_earliest),
+    frostFree: st.frost_free_median,
+    stats: st,
+  };
+}
+
+export function frostTipLine(fm, d) {
+  const k = fm.count(d);
+  const spring = d <= dayNum(`${new Date(d * 86400000).getUTCFullYear()}-07-31`);
+  if (spring) return k ? `Frost an diesem Tag oder später noch in ${k} von ${fm.n} Jahren` : `Kein Frost mehr ab hier, in allen ${fm.n} Jahren`;
+  return k ? `Erster Frost bis hier schon in ${k} von ${fm.n} Jahren` : `Bis hier frostfrei, in allen ${fm.n} Jahren`;
+}
+
+const fmtMmdd = (mmdd) => (mmdd ? fmtDay(dayNum(`2001-${mmdd}`)) : "–");
+
+// Zusammenfassung in Sätzen, z. B. für die Einstellungen
+export function frostSummary(frost) {
+  if (!frost) return ["Frostdaten werden geladen …"];
+  if (frost.status === "off") return [];
+  if (frost.status === "no_location") return ["Für die Frostdaten fehlt der Standort."];
+  if (frost.status !== "ok" || !frost.stats?.spring_median) return [frost.error || "Keine Frostdaten verfügbar."];
+  const st = frost.stats, n = frost.n;
+  const safeCount = frost.spring.filter((v) => v == null || v <= st.spring_safe).length;
+  const earlyCount = frost.autumn.filter((v) => v != null && v <= st.autumn_safe).length;
+  const th = frost.threshold > 0 ? `+${fmtNum(frost.threshold)}` : fmtNum(frost.threshold);
+  return [
+    `Ausgewertet: ${frost.years[0]}–${frost.years[1]}, Tiefstwert ${th} °C oder kälter.`,
+    `Letzter Frost im Frühjahr: in der Hälfte der Jahre bis ${fmtMmdd(st.spring_median)}, `
+      + (safeCount >= n || st.spring_safe === st.spring_latest
+        ? `in allen Jahren bis ${fmtMmdd(st.spring_latest)}.`
+        : `in ${safeCount} von ${n} Jahren bis ${fmtMmdd(st.spring_safe)}, spätestens am ${fmtMmdd(st.spring_latest)}.`),
+    st.autumn_median
+      ? `Erster Frost im Herbst: in der Hälfte der Jahre bis ${fmtMmdd(st.autumn_median)}; `
+        + (earlyCount
+          ? `bis ${fmtMmdd(st.autumn_safe)} nur in ${earlyCount} von ${n} Jahren, frühestens am ${fmtMmdd(st.autumn_earliest)}.`
+          : `vor dem ${fmtMmdd(st.autumn_earliest)} in keinem Jahr.`)
+      : "Im Herbst gab es bis Jahresende in keinem Jahr Frost.",
+    st.frost_free_median != null ? `Frostfrei im Mittel ${st.frost_free_median} Tage.` : null,
+  ].filter(Boolean);
+}
+
+// Frostrisiko als Schattierung hinter den Beeten, dazu die mittleren Termine als Linien
+export function frostOverlay(geo, fm) {
+  const { ys, len, ppd } = geo;
+  const svg = s("svg", { class: "frost-overlay", width: len * ppd, height: "100%", "aria-hidden": "true" });
+  let run = null;
+  const flush = () => {
+    if (run && run.k > 0) {
+      svg.append(s("rect", { x: (run.from - ys) * ppd, y: 0, width: (run.to - run.from + 1) * ppd, height: "100%",
+        fill: FROST_COLOR, "fill-opacity": (0.04 + 0.18 * (run.k / fm.n)).toFixed(3) }));
+    }
+    run = null;
+  };
+  for (let d = ys; d < ys + len; d++) {
+    const k = fm.count(d);
+    if (run && run.k === k) { run.to = d; continue; }
+    flush();
+    run = { from: d, to: d, k };
+  }
+  flush();
+  for (const d of [fm.spring, fm.autumn]) {
+    if (d == null || d < ys || d >= ys + len) continue;
+    const x = (d - ys + 0.5) * ppd;
+    svg.append(s("line", { x1: x, x2: x, y1: 0, y2: "100%", class: "frost-median" }));
+  }
+  return svg;
 }
 
 // ---------------------------------------------------------------- Band in der Zeitleiste
@@ -98,7 +205,7 @@ function levelChip(level, short = false) {
 }
 
 // geo: { year, ys, len, ppd, labelW }; onSettings öffnet die Einstellungen
-export function weatherBand(geo, data, { onSettings } = {}) {
+export function weatherBand(geo, data, { onSettings, frost: fm = null } = {}) {
   const { ys, len, ppd, labelW } = geo;
   const narrow = labelW < 120;
   const status = h("span", { class: "wx-status" });
@@ -109,7 +216,12 @@ export function weatherBand(geo, data, { onSettings } = {}) {
   let balance = [];
   const byDay = new Map();
 
-  const note = (...children) => track.append(h("div", { class: "wx-note" }, ...children));
+  const note = (...children) => track.append(h("div", { class: "wx-note-wrap" }, h("div", { class: "wx-note" }, ...children)));
+  if (data?.status === "ok" && data.days.length) {
+    balance = waterBalance(data.days);
+    for (const d of balance) byDay.set(d.n, d);
+  }
+  if (balance.length || fm) track.append(drawBand(geo, balance, data?.today ? dayNum(data.today) : null, fm));
   if (!data) {
     note("Wetter wird geladen …");
   } else if (data.status === "no_location") {
@@ -117,14 +229,9 @@ export function weatherBand(geo, data, { onSettings } = {}) {
     note("Für das Wetter fehlt der Standort. ",
       h("button", { type: "button", class: "btn btn-sm", onclick: () => onSettings?.() }, "Standort festlegen"));
   } else if (data.status === "error" || (data.status === "ok" && !data.days.length)) {
-    note(data.error || "Für dieses Jahr gibt es keine Wetterdaten.");
-  } else if (data.status === "ok") {
-    balance = waterBalance(data.days);
-    for (const d of balance) byDay.set(d.n, d);
-    track.append(drawBand(geo, balance, dayNum(data.today)));
-    if (data.error) {
-      title.append(h("span", { class: "wx-warn", title: `${data.error}. Angezeigt werden die zuletzt gespeicherten Werte.` }, "!"));
-    }
+    note(data.error || "Für dieses Jahr gibt es noch keine Wetterdaten.");
+  } else if (data.error) {
+    title.append(h("span", { class: "wx-warn", title: `${data.error}. Angezeigt werden die zuletzt gespeicherten Werte.` }, "!"));
   }
 
   function setDay(day) {
@@ -147,12 +254,17 @@ export function weatherBand(geo, data, { onSettings } = {}) {
     const r = track.getBoundingClientRect();
     const n = ys + clamp(Math.floor((ev.clientX - r.left) / ppd), 0, len - 1);
     const d = byDay.get(n);
-    if (!d) { hide(); return; }
+    if (!d && !fm) { hide(); return; }
     const soil = soilOf();
     cursor.hidden = false;
     cursor.style.left = `${(n - ys) * ppd}px`;
     cursor.style.width = `${Math.max(ppd, 2)}px`;
-    tip.replaceChildren(...[
+    const frostLine = fm ? h("span", { class: "wx-tip-frost" }, frostTipLine(fm, n)) : null;
+    tip.replaceChildren(...(!d ? [
+      h("strong", {}, fmtDayLong(n)),
+      frostLine,
+      h("span", { class: "wx-tip-src" }, `Frost: Auswertung ${fm.years[0]}–${fm.years[1]}, Open-Meteo.com`),
+    ] : [
       h("strong", {}, fmtDayLong(n), d.forecast ? h("span", { class: "muted" }, " · Vorhersage") : null),
       h("span", {}, `Regen ${fmtNum(d.precip ?? 0)} mm`),
       d.tmin != null ? h("span", {}, `${fmtNum(d.tmin, 0)} bis ${fmtNum(d.tmax, 0)} °C${d.tmin <= 0 ? ", Frost" : ""}`) : null,
@@ -161,8 +273,9 @@ export function weatherBand(geo, data, { onSettings } = {}) {
         d.deficit >= 0.5 ? ` · Defizit ${fmtNum(d.deficit, 0)} mm` : ""),
       d.water ? h("strong", { class: "wx-tip-water" }, `Gießtag: etwa ${fmtNum(soil.refill, 0)} l/m²`)
         : h("span", { class: "muted" }, `Gießen ab ${fmtNum(soil.threshold, 0)} mm Defizit`),
+      frostLine,
       h("span", { class: "wx-tip-src" }, "Wetterdaten: Open-Meteo.com"),
-    ].filter(Boolean));
+    ]).filter(Boolean));
     document.body.append(tip);
     tip.hidden = false;
     const tw = tip.offsetWidth, th = tip.offsetHeight;
@@ -176,7 +289,7 @@ export function weatherBand(geo, data, { onSettings } = {}) {
     cursor.hidden = true;
     tip.remove();
   }
-  if (balance.length) {
+  if (balance.length || fm) {
     track.addEventListener("pointermove", (e) => { if (e.pointerType === "mouse") show(e); });
     track.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hide(); });
     track.addEventListener("click", (e) => {
@@ -193,7 +306,7 @@ export function weatherBand(geo, data, { onSettings } = {}) {
   return { row, setDay, hide };
 }
 
-function drawBand(geo, balance, today) {
+function drawBand(geo, balance, today, fm) {
   const { year, ys, len, ppd } = geo;
   const W = len * ppd;
   const svg = s("svg", { class: "wx-svg", width: W, height: WX_H, viewBox: `0 0 ${W} ${WX_H}`, "aria-hidden": "true" });
@@ -209,7 +322,7 @@ function drawBand(geo, balance, today) {
     svg.append(s("rect", { x: x0, y: 0, width: x1 - x0, height: WX_H, class: "wx-fc-bg" }));
     if (x1 - x0 > 70) svg.append(s("text", { x: x0 + 3, y: 9, class: "wx-fc-label" }, "Vorhersage"));
   }
-  if (today >= ys && today < ys + len) {
+  if (today != null && today >= ys && today < ys + len) {
     const x = (today - ys + 0.5) * ppd;
     svg.append(s("line", { x1: x, x2: x, y1: 0, y2: WX_H, class: "wx-today" }));
   }
@@ -228,6 +341,16 @@ function drawBand(geo, balance, today) {
     }
   }
   svg.append(s("line", { x1: 0, x2: W, y1: base + 0.5, y2: base + 0.5, class: "wx-base" }));
+  // Mittlere Frosttermine der Vorjahre
+  if (fm) {
+    for (const [d, text, anchor] of [[fm.spring, "Ø letzter Frost", "start"], [fm.autumn, "Ø erster Frost", "end"]]) {
+      if (d == null || d < ys || d >= ys + len) continue;
+      const x = (d - ys + 0.5) * ppd;
+      svg.append(s("line", { x1: x, x2: x, y1: 0, y2: WX_H, class: "wx-frost-median" }));
+      svg.append(s("text", { x: anchor === "start" ? x + 4 : x - 4, y: 16, "text-anchor": anchor, class: "wx-frost-label" },
+        `${text} ${fmtDay(d)}`));
+    }
+  }
   // Wasserbilanz als Streifen, gleiche Tage zusammengefasst
   let run = null;
   const flush = () => {
