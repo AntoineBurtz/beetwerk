@@ -17,6 +17,7 @@ Dazu gibt es:
 - Folgesätze mit einem Klick, Rückgängig (Strg+Z), JSON-Sicherung.
 - Grundstück auf dem Luftbild: Grenze einzeichnen, Beete liegen am echten Ort, Luftbild hinter den Beeten ein- und ausblenden.
 - Wetterband in der Zeitleiste: Regen, Frost und Wasserbilanz mit empfohlenen Gießtagen (Daten von Open-Meteo).
+- Wetter-Seite mit Diagrammen und Monatstabelle, jeweils im Vergleich zum Mittel der letzten 20 Jahre.
 - Mischsatz: viele Sorten einer Kultur (z. B. 15 Tomatensorten zu je 4 bis 10 Pflanzen) als ein Satz, mit Sortenliste, Pflanzschema und Pflanzplan zum Herunterladen.
 
 ## Wetter und Gießen
@@ -38,6 +39,21 @@ Die Wasserbilanz rechnet wie ein Bodenspeicher: Die Verdunstung (ET₀ nach FAO)
 
 Das sind Richtwerte für 30 cm Wurzeltiefe und einen geschlossenen Bestand. Folientunnel und Gewächshaus bekommen keinen Regen, für sie gilt das Band nicht.
 
+### Wetter-Seite
+
+Der Reiter „Wetter“ zeigt das Jahr des Stichtags (mit „‹ 2025“ und „2027 ›“ umschaltbar), jeweils mit dem Mittel der letzten 20 Jahre als Vergleich:
+
+- **Kennzahlen:** Regen seit 1. Januar und in den letzten 30 Tagen, nächster Gießtag, Frost (laut Vorhersage oder bisher).
+- **Niederschlag seit 1. Januar:** aufsummiert, dieses Jahr gegen das Mittel; die Vorhersage gestrichelt.
+- **Niederschlag je Monat:** Säulen für dieses Jahr, graue Striche für das Mittel.
+- **Temperatur:** Tiefst bis Höchst je Tag, Frost violett, das Mittel als graues Band.
+- **Bodenwasser-Defizit:** Verlauf der Wasserbilanz mit Gießschwelle und Gießtagen.
+- **Monatswerte:** Regen, Abweichung, Regentage, mittlere Höchst- und Tiefstwerte, Frosttage, Verdunstung und Gießtage, in Klammern das Mittel.
+- **Die nächsten Tage:** die 16 Tage Vorhersage mit Hinweisen auf Frost, Gießtage und viel Regen.
+- **Frostfreie Zeit je Jahr:** für jedes der letzten 20 Jahre die Spanne vom letzten bis zum ersten Frost, dazu das laufende Jahr.
+
+Alle Diagramme zeigen beim Überfahren oder Antippen die Werte des Tages; die drei Tagesdiagramme folgen dabei gemeinsam.
+
 ### Frosttermine
 
 Aus den Tiefstwerten der letzten 20 abgeschlossenen Jahre an deinem Standort ermittelt Beetwerk je Jahr den letzten Frost im Frühjahr (bis Ende Juli) und den ersten im Herbst (ab August). Daraus entsteht eine Statistik, keine Wettervorhersage:
@@ -46,7 +62,7 @@ Aus den Tiefstwerten der letzten 20 abgeschlossenen Jahre an deinem Standort erm
 - Überfahren oder Antippen eines Tages zeigt z. B. „Frost an diesem Tag oder später noch in 3 von 20 Jahren“, auch für kommende Jahre.
 - Unter Einstellungen → Wetter steht die Zusammenfassung, etwa „in 18 von 20 Jahren bis 7. Mai vorbei“. Dort lässt sich auch die Frostgrenze wählen: 0 °C, +2 °C (vorsichtig, Bodenfrost möglich) oder −2 °C.
 
-Die Werte stammen aus der Reanalyse ERA5-Land (rund 9 km Raster, 2 m Höhe) über das Open-Meteo-Archiv. Sie werden einmal geladen und gespeichert. In Senken und direkt über dem Boden ist es in klaren Nächten oft kälter, dafür ist die Einstellung +2 °C gedacht.
+Die Werte stammen aus der Reanalyse ERA5-Land (rund 9 km Raster, 2 m Höhe) über das Open-Meteo-Archiv: Tiefst- und Höchstwerte, Niederschlag und Verdunstung der letzten 20 Jahre, einmal geladen und gespeichert (nach Open-Meteos Rechnung rund 200 Aufrufe von 10.000 am Tag). In Senken und direkt über dem Boden ist es in klaren Nächten oft kälter, dafür ist die Einstellung +2 °C gedacht.
 
 **Datenquelle:** Der Server holt die Tageswerte bei [Open-Meteo](https://open-meteo.com) (Lizenz CC BY 4.0) und speichert sie. Die letzten 92 Tage und die Vorhersage werden höchstens alle drei Stunden neu geladen, ältere Tage nur einmal aus dem Archiv. Als Standort dient die Mitte des Grundstücks, auf 0,01° (rund 1 km) gerundet. Ohne Grundstück auf dem Luftbild lässt sich der Standort in den Einstellungen eintragen. Für private Nutzung ist Open-Meteo kostenlos und braucht keinen Schlüssel; unter Einstellungen → Wetter lässt sich der Abruf abschalten.
 
@@ -181,6 +197,7 @@ Die REST-API ist unter `/api/docs` dokumentiert. Wichtige Endpunkte:
 - `POST/PATCH/DELETE /api/beds`, `/api/crops`, `/api/plantings`
 - `GET /api/export`, `POST /api/import` für JSON-Sicherungen
 - `POST /api/demo?replace=true` lädt den Beispielgarten
+- `GET /api/climate` liefert die Mittelwerte der letzten 20 Jahre je Tag (geglättet) und je Monat
 - `GET /api/frost?threshold=0` liefert je Jahr den letzten und ersten Frosttag der letzten 20 Jahre samt Statistik
 - `GET /api/weather?year=2026` liefert die gespeicherten Tageswerte (Niederschlag, Tiefst- und Höchsttemperatur, ET₀, Vorhersage ja/nein) und lädt bei Bedarf nach
 

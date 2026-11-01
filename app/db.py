@@ -137,6 +137,11 @@ def init_db() -> None:
 
 # Spalten, die nach der ersten Version dazugekommen sind
 MIGRATIONS = {
+    "climate_days": [
+        ("tmax", "REAL"),
+        ("precip", "REAL"),
+        ("et0", "REAL"),
+    ],
     "plantings": [
         ("varieties", "TEXT NOT NULL DEFAULT ''"),     # Mischsatz: JSON-Liste [{name, count, ref?}]
         ("fill", "TEXT NOT NULL DEFAULT 'snake'"),     # Pflanzschema: snake | columns

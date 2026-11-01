@@ -468,6 +468,12 @@ def frost(threshold: Optional[float] = None):
     return weather.frost_data(threshold)
 
 
+@app.get("/api/climate")
+def climate():
+    """Mittelwerte der letzten 20 Jahre: je Tag (geglättet) und je Monat."""
+    return weather.climate_data()
+
+
 @app.get("/api/export")
 def export_all():
     data = all_data()

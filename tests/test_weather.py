@@ -200,7 +200,15 @@ class FakeClimate:
             raise weather.WeatherError("Open-Meteo meldet: Unknown model")
         start, end = date.fromisoformat(params["start_date"]), date.fromisoformat(params["end_date"])
         days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
-        return {"daily": {"time": [d.isoformat() for d in days], "temperature_2m_min": [self.tmin(d) for d in days]}}
+        tmin = [self.tmin(d) for d in days]
+        return {"daily": {
+            "time": [d.isoformat() for d in days],
+            "temperature_2m_min": tmin,
+            "temperature_2m_max": [t + 10 for t in tmin],
+            # Regen: jeden 3. Tag 3 mm, also rund 1 mm am Tag
+            "precipitation_sum": [3.0 if d.toordinal() % 3 == 0 else 0.0 for d in days],
+            "et0_fao_evapotranspiration": [2.0 if 4 <= d.month <= 9 else 0.5 for d in days],
+        }}
 
 
 def test_frost_stats_rule():
@@ -231,7 +239,7 @@ def test_frost_endpoint(client, fake, monkeypatch):
     assert r["years"] == [2006, 2025] and r["n"] == 20 and r["threshold"] == 0
     # erst mit ERA5-Land versucht, dann ohne Modellangabe
     assert clim.calls[0]["models"] == "era5_land" and "models" not in clim.calls[1]
-    assert clim.calls[1]["daily"] == "temperature_2m_min"
+    assert clim.calls[1]["daily"].split(",") == weather.CLIMATE_VARS
     assert (clim.calls[1]["start_date"], clim.calls[1]["end_date"]) == ("2006-01-01", "2025-12-31")
     y2025 = next(y for y in r["per_year"] if y["year"] == 2025)
     assert y2025 == {"year": 2025, "spring": "2025-04-15", "autumn": "2025-10-06"}
@@ -268,3 +276,32 @@ def test_frost_archive_unreachable(client, fake):
     n = len(fake.calls)
     client.get("/api/frost")
     assert len(fake.calls) == n
+
+
+def test_climate_normals(client, fake, monkeypatch):
+    clim = FakeClimate()
+    monkeypatch.setattr(weather, "_fetch_json", clim)
+    weather._climate_tries.clear()
+    with db.session() as conn:
+        conn.execute("DELETE FROM climate_days")
+    client.patch("/api/settings", json={"weather_lat": 48.37, "weather_lon": 10.9})
+    r = client.get("/api/climate").json()
+    assert r["status"] == "ok" and r["error"] is None and r["n"] == 20
+    assert len(clim.calls) == 1 and clim.calls[0]["models"] == "era5_land"
+    assert len(r["daily"]["precip_cum"]) == 365 and len(r["daily"]["tmin"]) == 365
+    # jeder dritte Tag 3 mm: rund 365 mm im Jahr, gut 10 Regentage im Monat
+    assert 355 <= r["year_precip"] <= 375
+    assert abs(r["daily"]["precip_cum"][-1] - 365) < 10
+    jan, jul = r["months"][0], r["months"][6]
+    assert 9.5 <= jan["rain_days"] <= 11 and jan["frost_days"] >= 29 and jul["frost_days"] == 0
+    assert jul["et0"] == 62.0 and jul["tmax"] == 18.0 and jul["tmin"] == 8.0
+    # Frost nutzt denselben Speicher: kein weiterer Abruf
+    client.get("/api/frost")
+    assert len(clim.calls) == 1
+
+
+def test_smooth_wraps_year():
+    vals = [0.0] * 365
+    vals[0] = 15.0
+    sm = weather._smooth(vals, 15)
+    assert sm[0] == 1.0 and sm[364] == 1.0 and sm[7] == 1.0 and sm[8] == 0.0
