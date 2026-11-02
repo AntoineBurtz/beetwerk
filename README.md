@@ -66,6 +66,8 @@ Die Werte stammen aus der Reanalyse ERA5-Land (rund 9 km Raster, 2 m Höhe) übe
 
 **Datenquelle:** Der Server holt die Tageswerte bei [Open-Meteo](https://open-meteo.com) (Lizenz CC BY 4.0) und speichert sie. Die letzten 92 Tage und die Vorhersage werden höchstens alle drei Stunden neu geladen, ältere Tage nur einmal aus dem Archiv. Als Standort dient die Mitte des Grundstücks, auf 0,01° (rund 1 km) gerundet. Ohne Grundstück auf dem Luftbild lässt sich der Standort in den Einstellungen eintragen. Für private Nutzung ist Open-Meteo kostenlos und braucht keinen Schlüssel; unter Einstellungen → Wetter lässt sich der Abruf abschalten.
 
+Beetwerk fragt Open-Meteo nacheinander statt gleichzeitig an und lädt die 20 Vergleichsjahre in Teilen zu fünf Jahren. Meldet der Dienst Überlastung, wartet Beetwerk zehn Minuten und versucht es dann erneut; bis dahin gelten die gespeicherten Werte. Vergangene Jahre kommen aus den gespeicherten Vergleichsdaten. Fehlen für einzelne vergangene Tage Werte, holt Beetwerk sie aus dem Archiv nach; die Wetter-Seite nennt fehlende Tage.
+
 ## Mischsatz
 
 Wer viele Sorten in kleinen Stückzahlen anbaut, legt dafür einen einzigen Satz an statt vieler kleiner:

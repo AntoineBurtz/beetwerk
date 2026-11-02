@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -30,9 +32,22 @@ REFRESH = timedelta(hours=3)
 ATTRIBUTION = "Wetterdaten: Open-Meteo.com (CC BY 4.0)"
 STATE_KEYS = ("weather_loc", "weather_fetched_at")  # interner Zustand, gehört nicht in Sicherungen
 
-# Letzter Archivabruf je Jahr; fehlen danach noch Tage, wird erst nach REFRESH wieder gefragt
-_archive_tries: dict[int, datetime] = {}
-_climate_tries: dict[tuple[int, int], datetime] = {}
+# Letzte Abrufe: (Zeitpunkt, erfolgreich). Nach Erfolg wird erst nach REFRESH wieder gefragt,
+# nach einem Fehler nach RETRY_FAILED.
+_archive_tries: dict[int, tuple[datetime, bool, str | None]] = {}
+_climate_tries: dict[tuple[int, int], tuple[datetime, bool, str | None]] = {}
+_forecast_failed: datetime | None = None
+RETRY_FAILED = timedelta(minutes=10)
+
+# Open-Meteo nicht mit mehreren großen Anfragen gleichzeitig belasten: eine nach der anderen.
+# Meldet der Dienst Überlastung, legt Beetwerk eine Pause ein.
+_net_lock = threading.Lock()
+_backoff_until: dict[str, datetime] = {}  # je Server (Vorhersage und Archiv sind getrennt)
+BACKOFF = timedelta(minutes=10)
+RETRY_SLEEP = 3.0       # Sekunden vor einem zweiten Versuch bei Überlastung
+CHUNK_PAUSE = 1.0       # Sekunden zwischen den Teilabrufen der Vergleichsjahre
+CLIMATE_CHUNK = 5       # Jahre je Archivabruf
+ARCHIVE_DELAY = 6       # so viele Tage hinkt das Archiv (ERA5) hinterher
 
 CLIMATE_YEARS = 20                 # so viele abgeschlossene Jahre zählen für die Froststatistik
 CLIMATE_MODEL = "era5_land"        # Reanalyse mit rund 9 km Auflösung, über die Jahre einheitlich
@@ -40,7 +55,9 @@ FROST_THRESHOLDS = (-2.0, 0.0, 2.0)
 
 
 class WeatherError(Exception):
-    pass
+    def __init__(self, message: str, busy: bool = False):
+        super().__init__(message)
+        self.busy = busy  # Dienst überlastet oder Abruflimit erreicht
 
 
 def today() -> date:
@@ -66,20 +83,39 @@ def location(settings: dict) -> tuple[float, float] | None:
     return None
 
 
-def _fetch_json(url: str, params: dict) -> dict:
+def _fetch_json(url: str, params: dict, retries: int = 1) -> dict:
+    host = urllib.parse.urlsplit(url).netloc
+    until = _backoff_until.get(host)
+    if until and now() < until:
+        raise WeatherError("Open-Meteo ist gerade überlastet", busy=True)
     full = f"{url}?{urllib.parse.urlencode(params)}"
     req = urllib.request.Request(full, headers={"User-Agent": USER_AGENT})
-    try:
-        with urllib.request.urlopen(req, timeout=20) as res:
-            return json.loads(res.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
+    for attempt in range(retries + 1):
         try:
-            reason = json.loads(exc.read().decode("utf-8")).get("reason") or exc.reason
-        except Exception:
-            reason = exc.reason
-        raise WeatherError(f"Open-Meteo meldet: {reason}") from exc
-    except Exception as exc:  # Netzwerk, Zeitüberschreitung, kaputte Antwort
-        raise WeatherError(f"Open-Meteo ist nicht erreichbar ({exc})") from exc
+            with urllib.request.urlopen(req, timeout=30) as res:
+                return json.loads(res.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            try:
+                reason = json.loads(exc.read().decode("utf-8")).get("reason") or exc.reason
+            except Exception:
+                reason = exc.reason
+            busy = exc.code in (429, 503) or any(w in str(reason).lower() for w in ("overload", "limit", "too many"))
+            if busy and attempt < retries:
+                time.sleep(RETRY_SLEEP)
+                continue
+            if busy:
+                _backoff_until[host] = now() + BACKOFF
+            raise WeatherError(f"Open-Meteo meldet: {reason}", busy=busy) from exc
+        except Exception as exc:  # Netzwerk, Zeitüberschreitung, kaputte Antwort
+            raise WeatherError(f"Open-Meteo ist nicht erreichbar ({exc})") from exc
+    raise WeatherError("Open-Meteo ist nicht erreichbar")
+
+
+def _due(entry: tuple[datetime, bool, str | None] | None, force: bool = False) -> bool:
+    if force or entry is None:
+        return True
+    when, ok, _ = entry
+    return now() - when > (REFRESH if ok else RETRY_FAILED)
 
 
 def _rows(payload: dict, first_forecast: date) -> list[tuple]:
@@ -94,17 +130,50 @@ def _rows(payload: dict, first_forecast: date) -> list[tuple]:
     return out
 
 
-def _store(rows: list[tuple]) -> None:
+def _store(rows: list[tuple], replace: bool = True) -> None:
+    """replace=False füllt nur Lücken und lässt vorhandene Tage stehen."""
     stamp = now().isoformat(timespec="seconds")
+    conflict = ("DO UPDATE SET precip = excluded.precip, tmin = excluded.tmin, tmax = excluded.tmax, "
+                "et0 = excluded.et0, forecast = excluded.forecast, fetched_at = excluded.fetched_at"
+                if replace else "DO NOTHING")
     with db.session() as conn:
         conn.executemany(
-            """INSERT INTO weather_days(day, precip, tmin, tmax, et0, forecast, fetched_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(day) DO UPDATE SET precip = excluded.precip, tmin = excluded.tmin,
-                 tmax = excluded.tmax, et0 = excluded.et0, forecast = excluded.forecast,
-                 fetched_at = excluded.fetched_at""",
+            f"""INSERT INTO weather_days(day, precip, tmin, tmax, et0, forecast, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(day) {conflict}""",
             [(*r, stamp) for r in rows],
         )
+
+
+def _fill_from_climate(first: date, last: date) -> None:
+    """Vergangene Jahre stecken schon in den Vergleichsdaten: dort nehmen, statt neu zu fragen."""
+    stamp = now().isoformat(timespec="seconds")
+    with db.session() as conn:
+        conn.execute(
+            """INSERT INTO weather_days(day, precip, tmin, tmax, et0, forecast, fetched_at)
+               SELECT day, precip, tmin, tmax, et0, 0, ? FROM climate_days
+               WHERE day BETWEEN ? AND ? AND precip IS NOT NULL AND tmin IS NOT NULL
+               ON CONFLICT(day) DO NOTHING""",
+            (stamp, first.isoformat(), last.isoformat()))
+
+
+def _missing(first: date, last: date) -> list[date]:
+    if first > last:
+        return []
+    with db.session() as conn:
+        have = {r["day"] for r in db.rows(conn, "SELECT day FROM weather_days WHERE day BETWEEN ? AND ?",
+                                          (first.isoformat(), last.isoformat()))}
+    return [first + timedelta(days=i) for i in range((last - first).days + 1)
+            if (first + timedelta(days=i)).isoformat() not in have]
+
+
+def _ranges(days: list[date]) -> list[list[str]]:
+    out: list[list[date]] = []
+    for d in days:
+        if out and (d - out[-1][1]).days == 1:
+            out[-1][1] = d
+        else:
+            out.append([d, d])
+    return [[a.isoformat(), b.isoformat()] for a, b in out]
 
 
 def _set(key: str, value: str) -> None:
@@ -149,6 +218,7 @@ def year_data(year: int, force: bool = False) -> dict:
         return {**base, "status": status}
     lat, lon = loc
 
+    global _forecast_failed
     t = today()
     first, last = date(year, 1, 1), date(year, 12, 31)
     recent_from = t - timedelta(days=PAST_DAYS)
@@ -162,41 +232,44 @@ def year_data(year: int, force: bool = False) -> dict:
         except ValueError:
             return True
 
-    def archive_due() -> bool:
-        last_try = _archive_tries.get(year)
-        return force or last_try is None or now() - last_try > REFRESH
+    with _net_lock:
+        # 1) jüngste Tage und Vorhersage
+        recently_failed = _forecast_failed and now() - _forecast_failed < RETRY_FAILED
+        if first <= horizon and last >= recent_from and stale("weather_fetched_at") and (force or not recently_failed):
+            try:
+                payload = _fetch_json(FORECAST_URL, {
+                    "latitude": lat, "longitude": lon, "daily": ",".join(DAILY), "timezone": "auto",
+                    "past_days": PAST_DAYS, "forecast_days": FORECAST_DAYS,
+                })
+                _store(_rows(payload, t))
+                _set("weather_fetched_at", now().isoformat(timespec="seconds"))
+                _forecast_failed = None
+            except WeatherError as exc:
+                errors.append(str(exc))
+                _forecast_failed = now()
 
-    # 1) jüngste Tage und Vorhersage
-    if first <= horizon and last >= recent_from and stale("weather_fetched_at"):
-        try:
-            payload = _fetch_json(FORECAST_URL, {
-                "latitude": lat, "longitude": lon, "daily": ",".join(DAILY), "timezone": "auto",
-                "past_days": PAST_DAYS, "forecast_days": FORECAST_DAYS,
-            })
-            _store(_rows(payload, t))
-            _set("weather_fetched_at", now().isoformat(timespec="seconds"))
-        except WeatherError as exc:
-            errors.append(str(exc))
+        # 2) was in den Vergleichsjahren schon da ist
+        _fill_from_climate(first, min(last, t - timedelta(days=1)))
 
-    # 2) ältere Tage aus dem Archiv, nur was noch fehlt
-    arch_to = min(last, recent_from - timedelta(days=1))
-    if first <= arch_to:
-        with db.session() as conn:
-            have = {r["day"] for r in db.rows(conn, "SELECT day FROM weather_days WHERE day BETWEEN ? AND ?",
-                                              (first.isoformat(), arch_to.isoformat()))}
-        missing = [first + timedelta(days=i) for i in range((arch_to - first).days + 1)
-                   if (first + timedelta(days=i)).isoformat() not in have]
-        if missing and archive_due():
+        # 3) übrige vergangene Tage aus dem Archiv, auch Lücken in den letzten Wochen
+        arch_to = min(last, t - timedelta(days=ARCHIVE_DELAY))
+        missing = _missing(first, arch_to)
+        if missing and _due(_archive_tries.get(year), force):
+            err = None
             try:
                 payload = _fetch_json(ARCHIVE_URL, {
                     "latitude": lat, "longitude": lon, "daily": ",".join(DAILY), "timezone": "auto",
                     "start_date": missing[0].isoformat(), "end_date": missing[-1].isoformat(),
                 })
-                _store(_rows(payload, t + timedelta(days=1)))
+                _store(_rows(payload, t + timedelta(days=1)), replace=False)
             except WeatherError as exc:
-                errors.append(str(exc))
-            _archive_tries[year] = now()
+                err = str(exc)
+            _archive_tries[year] = (now(), err is None, err)
+        last_try = _archive_tries.get(year)
+        if missing and last_try and last_try[2] and last_try[2] not in errors:
+            errors.append(last_try[2])  # letzter Fehler, bis zum nächsten Versuch
 
+    gaps = _ranges(_missing(first, min(last, t - timedelta(days=1))))
     with db.session() as conn:
         days = db.rows(conn, "SELECT day, precip, tmin, tmax, et0, forecast FROM weather_days "
                              "WHERE day BETWEEN ? AND ? ORDER BY day", (first.isoformat(), last.isoformat()))
@@ -205,7 +278,7 @@ def year_data(year: int, force: bool = False) -> dict:
     for d in days:
         d["forecast"] = bool(d["forecast"]) and d["day"] >= t.isoformat()
     return {**base, "status": "ok", "location": {"lat": lat, "lon": lon}, "today": t.isoformat(),
-            "fetched_at": fetched[0] if fetched else None, "days": days,
+            "fetched_at": fetched[0] if fetched else None, "days": days, "gaps": gaps,
             "error": errors[0] if errors else None}
 
 
@@ -275,38 +348,59 @@ def _climate_rows(first: date, last: date) -> dict[date, dict]:
     return {date.fromisoformat(r["day"]): r for r in rows}
 
 
+def _fetch_climate(lat: float, lon: float, first: date, last: date) -> None:
+    params = {"latitude": lat, "longitude": lon, "daily": ",".join(CLIMATE_VARS), "timezone": "auto",
+              "start_date": first.isoformat(), "end_date": last.isoformat()}
+    try:
+        payload = _fetch_json(ARCHIVE_URL, {**params, "models": CLIMATE_MODEL})
+    except WeatherError as exc:
+        if exc.busy:
+            raise
+        # falls das Modell nicht angeboten wird: Standardauswahl von Open-Meteo
+        payload = _fetch_json(ARCHIVE_URL, params)
+    d = payload.get("daily") or {}
+    days = d.get("time") or []
+    col = lambda k: d.get(k) or [None] * len(days)  # noqa: E731
+    data = [(day, tn, tx, p, e) for day, tn, tx, p, e in zip(
+        days, col("temperature_2m_min"), col("temperature_2m_max"), col("precipitation_sum"),
+        col("et0_fao_evapotranspiration")) if tn is not None]
+    with db.session() as conn:
+        conn.executemany(
+            """INSERT INTO climate_days(day, tmin, tmax, precip, et0) VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(day) DO UPDATE SET tmin = excluded.tmin, tmax = excluded.tmax,
+                 precip = excluded.precip, et0 = excluded.et0""", data)
+
+
 def _ensure_climate(lat: float, lon: float, y0: int, y1: int) -> tuple[dict[date, dict], str | None]:
-    """Tageswerte der Vergleichsjahre; lädt einmalig aus dem Archiv, was fehlt."""
+    """Tageswerte der Vergleichsjahre; lädt in Teilen von CLIMATE_CHUNK Jahren nach, was fehlt."""
     first, last = date(y0, 1, 1), date(y1, 12, 31)
-    rows = _climate_rows(first, last)
-    expected = (last - first).days + 1
-    complete = sum(1 for r in rows.values() if r["precip"] is not None and r["tmin"] is not None)
-    tried = _climate_tries.get((y0, y1))
     error = None
-    if complete < expected * 0.98 and (tried is None or now() - tried > REFRESH):
-        _climate_tries[(y0, y1)] = now()
-        params = {"latitude": lat, "longitude": lon, "daily": ",".join(CLIMATE_VARS), "timezone": "auto",
-                  "start_date": first.isoformat(), "end_date": last.isoformat()}
-        payload = None
-        try:
-            payload = _fetch_json(ARCHIVE_URL, {**params, "models": CLIMATE_MODEL})
-        except WeatherError:
-            try:  # falls das Modell nicht angeboten wird: Standardauswahl von Open-Meteo
-                payload = _fetch_json(ARCHIVE_URL, params)
-            except WeatherError as exc:
-                error = str(exc)
-        if payload:
-            d = payload.get("daily") or {}
-            days = d.get("time") or []
-            col = lambda k: d.get(k) or [None] * len(days)  # noqa: E731
-            data = [(day, tn, tx, p, e) for day, tn, tx, p, e in zip(
-                days, col("temperature_2m_min"), col("temperature_2m_max"), col("precipitation_sum"),
-                col("et0_fao_evapotranspiration")) if tn is not None]
-            with db.session() as conn:
-                conn.executemany(
-                    """INSERT INTO climate_days(day, tmin, tmax, precip, et0) VALUES (?, ?, ?, ?, ?)
-                       ON CONFLICT(day) DO UPDATE SET tmin = excluded.tmin, tmax = excluded.tmax,
-                         precip = excluded.precip, et0 = excluded.et0""", data)
+    with _net_lock:
+        rows = _climate_rows(first, last)
+        count: dict[int, int] = {}
+        for d, r in rows.items():
+            if r["precip"] is not None and r["tmin"] is not None:
+                count[d.year] = count.get(d.year, 0) + 1
+        missing = [y for y in range(y0, y1 + 1) if count.get(y, 0) < 360]
+        last_try = _climate_tries.get((y0, y1))
+        if missing and not _due(last_try):
+            error = last_try[2]  # letzter Fehler, bis zum nächsten Versuch
+        if missing and _due(last_try):
+            chunks: list[list[int]] = []
+            for y in missing:
+                if chunks and y == chunks[-1][-1] + 1 and len(chunks[-1]) < CLIMATE_CHUNK:
+                    chunks[-1].append(y)
+                else:
+                    chunks.append([y])
+            for i, chunk in enumerate(chunks):
+                if i:
+                    time.sleep(CHUNK_PAUSE)
+                try:
+                    _fetch_climate(lat, lon, date(chunk[0], 1, 1), date(chunk[-1], 12, 31))
+                except WeatherError as exc:
+                    error = str(exc)
+                    break
+            _climate_tries[(y0, y1)] = (now(), error is None, error)
             rows = _climate_rows(first, last)
     return rows, error
 

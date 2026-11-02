@@ -21,11 +21,13 @@ class FakeMeteo:
     def __init__(self):
         self.calls = []
         self.fail = False
+        self.forecast_nulls = set()   # Tage, für die die Forecast-Schnittstelle nichts liefert
+        self.archive_fail = False
 
     def __call__(self, url, params):
         self.calls.append((url, dict(params)))
-        if self.fail:
-            raise weather.WeatherError("Open-Meteo ist nicht erreichbar (Testfehler)")
+        if self.fail or (self.archive_fail and url == weather.ARCHIVE_URL):
+            raise weather.WeatherError("Open-Meteo meldet: The service is overloaded", busy=True)
         if url == weather.FORECAST_URL:
             start = TODAY - timedelta(days=params["past_days"])
             end = TODAY + timedelta(days=params["forecast_days"] - 1)
@@ -35,7 +37,8 @@ class FakeMeteo:
         src = 1.0 if url == weather.FORECAST_URL else 0.0
         return {"daily": {
             "time": [d.isoformat() for d in days],
-            "precipitation_sum": [12.0 if d.day == 1 else 0.0 for d in days],
+            "precipitation_sum": [None if (url == weather.FORECAST_URL and d in self.forecast_nulls)
+                                  else 12.0 if d.day == 1 else 0.0 for d in days],
             "temperature_2m_min": [-2.0 if d.month < 4 else 10.0 for d in days],
             "temperature_2m_max": [20.0 + src for _ in days],
             "et0_fao_evapotranspiration": [3.0 for _ in days],
@@ -52,7 +55,12 @@ def fake(monkeypatch):
     monkeypatch.setattr(weather, "_fetch_json", f)
     monkeypatch.setattr(weather, "today", lambda: TODAY)
     monkeypatch.setattr(weather, "now", lambda: clock["now"])
+    monkeypatch.setattr(weather, "CHUNK_PAUSE", 0)
+    monkeypatch.setattr(weather, "RETRY_SLEEP", 0)
+    monkeypatch.setattr(weather, "_backoff_until", {})
+    monkeypatch.setattr(weather, "_forecast_failed", None)
     weather._archive_tries.clear()
+    weather._climate_tries.clear()
     with db.session() as conn:
         conn.execute("DELETE FROM weather_days")
         conn.execute("DELETE FROM settings WHERE key IN ('geo', 'weather_loc', 'weather_fetched_at', "
@@ -135,7 +143,7 @@ def test_off_and_errors(client, fake):
     fake.fail = True
     fake.clock["now"] += weather.REFRESH * 2
     r = client.get("/api/weather?year=2026").json()
-    assert r["status"] == "ok" and r["days"] and "nicht erreichbar" in r["error"]
+    assert r["status"] == "ok" and r["days"] and "overloaded" in r["error"]
     assert len(fake.calls) == n + 1
     # Abgeschaltet: keine Anfragen mehr
     assert client.patch("/api/settings", json={"weather_enabled": "0"}).status_code == 200
@@ -240,7 +248,9 @@ def test_frost_endpoint(client, fake, monkeypatch):
     # erst mit ERA5-Land versucht, dann ohne Modellangabe
     assert clim.calls[0]["models"] == "era5_land" and "models" not in clim.calls[1]
     assert clim.calls[1]["daily"].split(",") == weather.CLIMATE_VARS
-    assert (clim.calls[1]["start_date"], clim.calls[1]["end_date"]) == ("2006-01-01", "2025-12-31")
+    # in Teilen zu fünf Jahren geladen, jeweils erst mit, dann ohne Modellangabe
+    assert [(c["start_date"], c["end_date"]) for c in clim.calls[1::2]] == [
+        ("2006-01-01", "2010-12-31"), ("2011-01-01", "2015-12-31"), ("2016-01-01", "2020-12-31"), ("2021-01-01", "2025-12-31")]
     y2025 = next(y for y in r["per_year"] if y["year"] == 2025)
     assert y2025 == {"year": 2025, "spring": "2025-04-15", "autumn": "2025-10-06"}
     assert r["stats"]["spring_median"] == "04-19" and r["stats"]["autumn_median"] == "10-10"
@@ -271,7 +281,7 @@ def test_frost_archive_unreachable(client, fake):
     client.patch("/api/settings", json={"weather_lat": 48.37, "weather_lon": 10.9})
     fake.fail = True
     r = client.get("/api/frost").json()
-    assert r["status"] == "ok" and r["stats"] == {} and "nicht erreichbar" in r["error"]
+    assert r["status"] == "ok" and r["stats"] == {} and "overloaded" in r["error"]
     # nicht bei jedem Aufruf erneut anfragen
     n = len(fake.calls)
     client.get("/api/frost")
@@ -287,7 +297,7 @@ def test_climate_normals(client, fake, monkeypatch):
     client.patch("/api/settings", json={"weather_lat": 48.37, "weather_lon": 10.9})
     r = client.get("/api/climate").json()
     assert r["status"] == "ok" and r["error"] is None and r["n"] == 20
-    assert len(clim.calls) == 1 and clim.calls[0]["models"] == "era5_land"
+    assert len(clim.calls) == 4 and all(c["models"] == "era5_land" for c in clim.calls)
     assert len(r["daily"]["precip_cum"]) == 365 and len(r["daily"]["tmin"]) == 365
     # jeder dritte Tag 3 mm: rund 365 mm im Jahr, gut 10 Regentage im Monat
     assert 355 <= r["year_precip"] <= 375
@@ -297,7 +307,7 @@ def test_climate_normals(client, fake, monkeypatch):
     assert jul["et0"] == 62.0 and jul["tmax"] == 18.0 and jul["tmin"] == 8.0
     # Frost nutzt denselben Speicher: kein weiterer Abruf
     client.get("/api/frost")
-    assert len(clim.calls) == 1
+    assert len(clim.calls) == 4
 
 
 def test_smooth_wraps_year():
@@ -305,3 +315,95 @@ def test_smooth_wraps_year():
     vals[0] = 15.0
     sm = weather._smooth(vals, 15)
     assert sm[0] == 1.0 and sm[364] == 1.0 and sm[7] == 1.0 and sm[8] == 0.0
+
+
+def test_gaps_in_recent_days_are_filled(client, fake):
+    """Liefert die Forecast-Schnittstelle für einige vergangene Tage nichts, hilft das Archiv aus."""
+    client.patch("/api/settings", json={"weather_lat": 48.37, "weather_lon": 10.9})
+    hole = {TODAY - timedelta(days=d) for d in range(40, 50)}
+    fake.forecast_nulls = hole
+    fake.archive_fail = True
+    r = client.get("/api/weather?year=2026").json()
+    a, b = min(hole).isoformat(), max(hole).isoformat()
+    assert r["gaps"] == [["2026-01-01", (TODAY - timedelta(days=93)).isoformat()], [a, b]]
+    assert "overloaded" in r["error"]
+    # nach der Pause: das Archiv füllt beide Lücken, vorhandene Tage bleiben unverändert
+    fake.archive_fail = False
+    fake.clock["now"] += weather.RETRY_FAILED + timedelta(minutes=1)
+    r = client.get("/api/weather?year=2026").json()
+    assert r["gaps"] == [] and r["error"] is None
+    arch = [p for u, p in fake.calls if u == weather.ARCHIVE_URL][-1]
+    assert (arch["start_date"], arch["end_date"]) == ("2026-01-01", b)
+    day = {d["day"]: d for d in r["days"]}
+    assert day[a]["tmax"] == 20.0                                    # aus dem Archiv
+    assert day[(TODAY - timedelta(days=30)).isoformat()]["tmax"] == 21.0  # Forecast bleibt
+
+
+def test_past_year_comes_from_climate(client, fake, monkeypatch):
+    clim = FakeClimate()
+    monkeypatch.setattr(weather, "_fetch_json", clim)
+    with db.session() as conn:
+        conn.execute("DELETE FROM climate_days")
+    client.patch("/api/settings", json={"weather_lat": 48.37, "weather_lon": 10.9})
+    client.get("/api/climate")
+    n = len(clim.calls)
+    r = client.get("/api/weather?year=2024").json()
+    assert len(r["days"]) == 366 and r["gaps"] == []
+    assert len(clim.calls) == n  # kein weiterer Abruf
+
+
+def test_climate_loads_in_parts_and_resumes(client, fake, monkeypatch):
+    clim = FakeClimate()
+    calls = []
+
+    def flaky(url, params):
+        calls.append(params["start_date"])
+        if params["start_date"] == "2011-01-01" and calls.count("2011-01-01") == 1:
+            raise weather.WeatherError("Open-Meteo meldet: The service is overloaded", busy=True)
+        return clim(url, params)
+
+    monkeypatch.setattr(weather, "_fetch_json", flaky)
+    with db.session() as conn:
+        conn.execute("DELETE FROM climate_days")
+    client.patch("/api/settings", json={"weather_lat": 48.37, "weather_lon": 10.9})
+    r = client.get("/api/climate").json()
+    assert "overloaded" in r["error"] and calls == ["2006-01-01", "2011-01-01"]
+    # kurz danach kein neuer Versuch, nach der Pause nur die fehlenden Jahre
+    client.get("/api/climate")
+    assert len(calls) == 2
+    fake.clock["now"] += weather.RETRY_FAILED + timedelta(minutes=1)
+    r = client.get("/api/climate").json()
+    assert r["error"] is None and r["n"] == 20
+    assert calls[2:] == ["2011-01-01", "2016-01-01", "2021-01-01"]
+
+
+def test_busy_service_backs_off(monkeypatch):
+    import io
+    import urllib.error
+
+    tries = []
+
+    def overloaded(req, timeout):
+        tries.append(req.full_url)
+        raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", {},
+                                     io.BytesIO(b'{"error": true, "reason": "The service is overloaded"}'))
+
+    clock = {"now": datetime(2026, 7, 15, 8, 0, tzinfo=timezone.utc)}
+    monkeypatch.setattr(weather, "now", lambda: clock["now"])
+    monkeypatch.setattr(weather, "RETRY_SLEEP", 0)
+    monkeypatch.setattr(weather, "_backoff_until", {})
+    monkeypatch.setattr(weather.urllib.request, "urlopen", overloaded)
+    with pytest.raises(weather.WeatherError, match="overloaded") as exc:
+        weather._fetch_json("https://example.invalid/v1/archive", {"latitude": 1})
+    assert exc.value.busy and len(tries) == 2          # ein zweiter Versuch
+    with pytest.raises(weather.WeatherError, match="überlastet"):
+        weather._fetch_json("https://example.invalid/v1/archive", {"latitude": 1})
+    assert len(tries) == 2                              # in der Pause gar nicht erst gefragt
+    # der andere Server (Vorhersage) ist davon nicht betroffen
+    with pytest.raises(weather.WeatherError, match="overloaded"):
+        weather._fetch_json("https://other.invalid/v1/forecast", {"latitude": 1})
+    assert len(tries) == 4
+    clock["now"] += weather.BACKOFF + timedelta(seconds=1)
+    with pytest.raises(weather.WeatherError):
+        weather._fetch_json("https://example.invalid/v1/archive", {"latitude": 1})
+    assert len(tries) == 6
