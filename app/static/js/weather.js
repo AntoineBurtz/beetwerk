@@ -69,7 +69,9 @@ function load(key, url, onLoad, onError) {
     entry = { data: entry?.data ?? null, at: entry?.at ?? 0, loading: true, waiters: new Set() };
     cache.set(key, entry);
     const done = (data) => {
-      Object.assign(entry, { data, at: Date.now(), loading: false });
+      // Mit Fehlermeldung nach zwei Minuten erneut fragen, der Server versucht es dann wieder
+      const at = data?.error ? Date.now() - MAX_AGE + 2 * 60 * 1000 : Date.now();
+      Object.assign(entry, { data, at, loading: false });
       const waiters = [...entry.waiters];
       entry.waiters.clear();
       for (const fn of waiters) fn();

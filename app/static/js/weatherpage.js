@@ -102,7 +102,8 @@ export function mountWeather(root) {
     const fc = bal.filter((d) => d.forecast);
     const normals = cl?.status === "ok" && cl.daily ? cl : null;
     const nYears = normals ? `${normals.years[0]}–${normals.years[1]}` : "";
-    const ctx = { year, ys, len, today, bal, byDay, obs, fc, normals, nYears, frost: fr?.status === "ok" ? fr : null };
+    const ctx = { year, ys, len, today, bal, byDay, obs, fc, normals, nYears, frost: fr?.status === "ok" ? fr : null,
+      gaps: (wx.gaps || []).map(([a, b]) => [dayNum(a), dayNum(b)]) };
 
     const out = [head(year)];
     const meta = [];
@@ -111,7 +112,19 @@ export function mountWeather(root) {
     out.push(h("p", { class: "muted small wx-meta" }, meta.join(" · "), meta.length ? " · " : "",
       h("a", { href: "https://open-meteo.com/", target: "_blank", rel: "noopener" }, "Wetterdaten: Open-Meteo.com (CC BY 4.0)")));
     if (wx.error) out.push(h("div", { class: "empty-note" }, `${wx.error}. Angezeigt werden die zuletzt gespeicherten Werte.`));
-    if (!bal.length) {
+    const gapDays = (wx.gaps || []).reduce((t, [a, b]) => t + dayNum(b) - dayNum(a) + 1, 0);
+    if (gapDays) {
+      const spans = wx.gaps.map(([a, b]) => (a === b ? fmtDay(dayNum(a)) : `${fmtDay(dayNum(a))} bis ${fmtDay(dayNum(b))}`));
+      out.push(h("div", { class: "empty-note" },
+        `Für ${gapDays === 1 ? "einen Tag" : `${gapDays} Tage`} fehlen noch Werte (${spans.join(", ")}). `
+        + "Beetwerk lädt sie aus dem Archiv nach, sobald Open-Meteo sie liefert; die letzten fünf Tage kommen erst mit einigen Tagen Verzug dort an."));
+    }
+    if (!normals && cl && cl.status !== "off") {
+      out.push(h("div", { class: "empty-note" }, cl.error
+        ? `Der Vergleich mit den letzten 20 Jahren fehlt noch: ${cl.error}. Beetwerk versucht es in einigen Minuten erneut, die Seite lädt dann von selbst nach.`
+        : "Die Vergleichswerte der letzten 20 Jahre werden geladen. Beim ersten Mal kann das eine Minute dauern."));
+    }
+    if (!bal.length && !wx.error) {
       out.push(h("div", { class: "empty-note" }, year > yearOf(today)
         ? `Für ${year} gibt es noch keine Wetterdaten. Unten stehen die Mittelwerte und Frosttermine der letzten Jahre.`
         : wx.error || `Für ${year} gibt es keine Wetterdaten.`));
@@ -143,6 +156,12 @@ export function mountWeather(root) {
       out.push(chartCard("Frostfreie Zeit je Jahr", frostChart(ctx), legend([
         ["rect", C.free, "frostfrei"], ["dot", C.frost, "letzter und erster Frost"], ["dash", C.frost, "Mitte"]]),
       null, frostSummary(ctx.frost).map((l) => h("p", {}, l))));
+    } else if (fr && fr.status !== "off") {
+      out.push(h("section", { class: "section chart-card" },
+        h("div", { class: "section-head" }, h("h2", {}, "Frostfreie Zeit je Jahr")),
+        h("p", { class: "muted small", style: { margin: 0 } }, fr.error
+          ? `Die Frostdaten der letzten 20 Jahre fehlen noch: ${fr.error}. Beetwerk versucht es in einigen Minuten erneut.`
+          : "Die Frostdaten der letzten 20 Jahre werden geladen …")));
     }
     inner.replaceChildren(...out);
     drawCharts();
@@ -161,11 +180,16 @@ export function mountWeather(root) {
     const totalNorm = ncum(ref);
     const last30 = sum(ref - 29, ref);
     const norm30 = normals ? (ref - 29 >= ctx.ys ? ncum(ref) - ncum(ref - 30) : null) : null;
+    // fehlende Tage im Zeitraum: Summe ist dann nur ein Teil, kein Vergleich
+    const missingIn = (from, to) => ctx.gaps.reduce((t, [a, b]) => t + Math.max(0, Math.min(b, to) - Math.max(a, from) + 1), 0);
+    const miss = missingIn(ctx.ys, ref), miss30 = missingIn(ref - 29, ref);
+    const incomplete = (n) => `unvollständig, ${n === 1 ? "1 Tag fehlt" : `${n} Tage fehlen`}`;
     const tiles = [
-      tile(`Regen seit 1. Januar`, `${fmtNum(total, 0)} mm`,
-        totalNorm ? `${signed(pct(total, totalNorm), " %")} gegenüber dem Mittel (${fmtNum(totalNorm, 0)} mm)` : null),
+      tile(`Regen seit 1. Januar`, `${fmtNum(total, 0)} mm`, miss ? incomplete(miss)
+        : totalNorm ? `${signed(pct(total, totalNorm), " %")} gegenüber dem Mittel (${fmtNum(totalNorm, 0)} mm)` : null),
       year === yearOf(today)
-        ? tile("Regen in den letzten 30 Tagen", `${fmtNum(last30, 0)} mm`, norm30 != null ? `Mittel: ${fmtNum(norm30, 0)} mm` : null)
+        ? tile("Regen in den letzten 30 Tagen", `${fmtNum(last30, 0)} mm`, miss30 ? incomplete(miss30)
+          : norm30 != null ? `Mittel: ${fmtNum(norm30, 0)} mm` : null)
         : tile("Regentage", String(obs.filter((x) => (x.precip ?? 0) >= 1).length),
           normals ? `mindestens 1 mm, Mittel: ${fmtNum(normals.months.reduce((t, m) => t + m.rain_days, 0), 0)}` : "mindestens 1 mm"),
     ];
@@ -368,9 +392,11 @@ export function mountWeather(root) {
       const a = Math.floor(Date.UTC(ctx.year, m, 1) / 86400000);
       const b = Math.floor(Date.UTC(ctx.year, m + 1, 1) / 86400000);
       const complete = days.length >= b - a;
+      const lastDay = Math.min(b - 1, ctx.today - 1);
+      const missing = ctx.gaps.reduce((t, [ga, gb]) => t + Math.max(0, Math.min(gb, lastDay) - Math.max(ga, a) + 1), 0);
       const tx = days.filter((d) => d.tmax != null), tn = days.filter((d) => d.tmin != null);
       out.push({
-        m, days: days.length, complete,
+        m, days: days.length, complete, missing,
         until: days.length ? days.at(-1).n : null,
         precip: r1(days.reduce((t, d) => t + (d.precip ?? 0), 0)),
         rain_days: days.filter((d) => (d.precip ?? 0) >= 1).length,
@@ -424,7 +450,8 @@ export function mountWeather(root) {
           }
           g.append(s("rect", { x: M.l + slot * m.m, y: M.t, width: slot, height: H + M.b, fill: "transparent" }));
           const content = () => [
-            h("span", { class: "tip-date" }, `${MONTHS[m.m]} ${ctx.year}${m.days && !m.complete ? ` (bis ${fmtDay(m.until)})` : ""}`),
+            h("span", { class: "tip-date" }, `${MONTHS[m.m]} ${ctx.year}${m.missing ? ` (${m.missing} ${m.missing === 1 ? "Tag fehlt" : "Tage fehlen"})`
+              : m.days && !m.complete ? ` (bis ${fmtDay(m.until)})` : ""}`),
             m.days ? row(C.rain, `${fmtNum(m.precip, 0)} mm`, `${m.rain_days} Regentage`, "rect") : h("span", { class: "muted" }, "noch keine Werte"),
             m.normal ? row(C.normal, `${fmtNum(m.normal.precip, 0)} mm`, `im Mittel, ${fmtNum(m.normal.rain_days, 0)} Regentage`) : null,
           ];
@@ -618,9 +645,11 @@ export function mountWeather(root) {
       const has = m.days > 0;
       const n = m.normal;
       return h("tr", { class: has ? null : "future" },
-        h("th", { scope: "row" }, MONTHS[m.m], has && !m.complete ? h("span", { class: "norm" }, ` bis ${fmtDay(m.until)}`) : null),
+        h("th", { scope: "row" }, MONTHS[m.m], m.missing
+          ? h("span", { class: "norm" }, ` ${m.missing === 1 ? "1 Tag fehlt" : `${m.missing} Tage fehlen`}`)
+          : has && !m.complete ? h("span", { class: "norm" }, ` bis ${fmtDay(m.until)}`) : null),
         h("td", { class: "r" }, withNorm(has ? v(m.precip) : v(null), n?.precip)),
-        h("td", { class: "r" }, has && n?.precip ? signed(pct(m.precip, m.complete ? n.precip : normalRain(ctx, m.m, m.until)), " %") : v(null)),
+        h("td", { class: "r" }, has && !m.missing && n?.precip ? signed(pct(m.precip, m.complete ? n.precip : normalRain(ctx, m.m, m.until)), " %") : v(null)),
         h("td", { class: "r" }, withNorm(has ? v(m.rain_days) : v(null), n?.rain_days)),
         h("td", { class: "r" }, withNorm(has ? v(m.tmax, 1, "°") : v(null), n?.tmax, 1, "°")),
         h("td", { class: "r" }, withNorm(has ? v(m.tmin, 1, "°") : v(null), n?.tmin, 1, "°")),
