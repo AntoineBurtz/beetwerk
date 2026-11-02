@@ -6,7 +6,7 @@ import {
 } from "./util.js";
 import { toast, confirmDialog, icon } from "./ui.js";
 import { mixEditor } from "./mix.js";
-import { SOILS, soilOf } from "./weather.js";
+import { SOILS, soilOf, FROST_OPTIONS, frostSummary } from "./weather.js";
 import { openGeoSetup } from "./geosetup.js";
 
 function shell(title, { onSubmit, extraHead } = {}) {
@@ -542,6 +542,18 @@ export function openSettings() {
   };
   soilSel.addEventListener("change", showSoil);
   showSoil();
+  const frostSel = h("select", { name: "weather_frost" },
+    FROST_OPTIONS.map(([v, label]) => h("option", { value: v, selected: (s.weather_frost ?? "0") === v }, label)));
+  const frostText = h("div", { class: "frost-summary" });
+  let frostReq = 0;
+  const showFrost = async () => {
+    const req = ++frostReq;
+    frostText.replaceChildren(...frostSummary(null).map((l) => h("p", {}, l)));
+    let data;
+    try { data = await api.get(`/api/frost?threshold=${frostSel.value}`); } catch (e) { data = { status: "error", error: e.message }; }
+    if (req === frostReq) frostText.replaceChildren(...frostSummary(data).map((l) => h("p", {}, l)));
+  };
+  frostSel.addEventListener("change", showFrost);
   const lat = h("input", { name: "weather_lat", inputmode: "decimal", placeholder: "z. B. 48,37",
     value: s.weather_lat ? fmtInput(Number(s.weather_lat)) : "" });
   const lon = h("input", { name: "weather_lon", inputmode: "decimal", placeholder: "z. B. 10,90",
@@ -554,6 +566,7 @@ export function openSettings() {
         rotation_years: Math.round(num(years.value) ?? 3),
         weather_enabled: wxOn.checked ? "1" : "0",
         weather_soil: soilSel.value,
+        weather_frost: frostSel.value,
       };
       if (!geo && (lat.value.trim() || lon.value.trim())) {
         const la = num(lat.value), lo = num(lon.value);
@@ -651,10 +664,14 @@ export function openSettings() {
       h("a", { href: "https://open-meteo.com/", target: "_blank", rel: "noopener" }, "Wetterdaten: Open-Meteo.com (CC BY 4.0)")),
     geo
       ? h("p", { class: "muted small", style: { margin: 0 } }, "Standort: Mitte des Grundstücks.")
-      : h("div", { class: "grid-2" },
-        field("Breite (° Nord)", lat), field("Länge (° Ost)", lon,
-          "Genauer und bequemer: das Grundstück auf dem Luftbild festlegen.")),
-    field("Boden im Garten", soilSel, soilHint));
+      : h("div", { style: { display: "grid", gap: "4px" } },
+        h("div", { class: "grid-2" }, field("Breite (° Nord)", lat), field("Länge (° Ost)", lon)),
+        h("span", { class: "muted small" }, "Genauer und bequemer: das Grundstück auf dem Luftbild festlegen.")),
+    field("Boden im Garten", soilSel, soilHint),
+    field("Frost zählt ab", frostSel,
+      "Die Daten gelten für 2 m Höhe und ein Gebiet von einigen Kilometern. In Senken und direkt über dem Boden friert es oft schon bei +2 °C."),
+    frostText);
+  showFrost();
 
   ui.body.append(
     field("Name des Gartens", name),

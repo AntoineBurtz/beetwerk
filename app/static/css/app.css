@@ -867,3 +867,14 @@ body.geo-open { overflow: hidden; }
   .tl-wx-corner { padding: 0 8px; }
   .wx-title { font-size: 13px; gap: 6px; }
 }
+
+/* ------------------------------------------------------------- Frost */
+.frost-overlay { position: absolute; left: 0; top: 0; height: 100%; }
+.frost-overlay .frost-median { stroke: #7b62c9; stroke-width: 1.5; stroke-dasharray: 5 4; opacity: .7; }
+.wx-frost-median { stroke: #7b62c9; stroke-width: 1.5; stroke-dasharray: 3 3; }
+.wx-frost-label { font: 600 11px var(--font-cond); fill: #4f3a9e; paint-order: stroke; stroke: rgba(251, 252, 249, .9); stroke-width: 3px; stroke-linejoin: round; }
+.wx-tip-frost { color: #4f3a9e; }
+.wx-note-wrap { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: center; }
+.wx-note-wrap .wx-note { pointer-events: auto; background: rgba(251, 252, 249, .85); height: auto; min-height: 22px; padding: 2px 8px; border-radius: var(--r-s); }
+.frost-summary { display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); }
+.frost-summary p { margin: 0; }

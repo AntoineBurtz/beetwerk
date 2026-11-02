@@ -169,3 +169,102 @@ def test_real_http_error_message(monkeypatch):
         weather._fetch_json("https://example.invalid/v1/forecast", {"latitude": 99})
     q = urllib.parse.urlencode({"daily": ",".join(weather.DAILY)})
     assert "precipitation_sum" in q
+
+
+# ---------------------------------------------------------------- Frost
+
+class FakeClimate:
+    """Archiv mit bekannten Frostterminen: letzter Frost am (10 + i). April, erster am (1 + i). Oktober,
+    i = 0..19 je nach Jahr. Ein Tag mit 1 °C liegt jeweils eine Woche nach dem letzten und vor dem ersten Frost."""
+
+    def __init__(self, reject_model=False):
+        self.calls = []
+        self.reject_model = reject_model
+
+    @staticmethod
+    def offset(year):
+        return year % 20
+
+    def tmin(self, d):
+        i = self.offset(d.year)
+        last, first = date(d.year, 4, 10 + i), date(d.year, 10, 1 + i)
+        if d <= last or d >= first:
+            return -1.0 if d in (last, first) or d.month in (1, 2, 12) else 5.0
+        if d in (last + timedelta(days=7), first - timedelta(days=7)):
+            return 1.0
+        return 8.0
+
+    def __call__(self, url, params):
+        self.calls.append(dict(params))
+        if self.reject_model and "models" in params:
+            raise weather.WeatherError("Open-Meteo meldet: Unknown model")
+        start, end = date.fromisoformat(params["start_date"]), date.fromisoformat(params["end_date"])
+        days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+        return {"daily": {"time": [d.isoformat() for d in days], "temperature_2m_min": [self.tmin(d) for d in days]}}
+
+
+def test_frost_stats_rule():
+    springs = list(range(100, 120))           # 11. bis 30. April
+    autumns = list(range(273, 293))           # 1. bis 20. Oktober
+    st = weather.frost_stats(springs, autumns)
+    # Median: in 10 von 20 Jahren war der letzte Frost bis dahin vorbei, "sicher": in 18 von 20
+    assert st["spring_median"] == "04-20" and st["spring_safe"] == "04-28"
+    assert st["spring_earliest"] == "04-11" and st["spring_latest"] == "04-30"
+    # Herbst: bis zum 2. Oktober gab es nur in 2 von 20 Jahren schon Frost
+    assert st["autumn_median"] == "10-10" and st["autumn_safe"] == "10-02"
+    assert st["frost_free_median"] == 173
+    # Jahre ohne Herbstfrost zählen als "kein Risiko"
+    st2 = weather.frost_stats([100, None], [None, None])
+    assert st2["autumn_median"] is None and st2["spring_median"] == "01-01"
+
+
+def test_frost_endpoint(client, fake, monkeypatch):
+    clim = FakeClimate(reject_model=True)
+    monkeypatch.setattr(weather, "_fetch_json", clim)
+    weather._climate_tries.clear()
+    with db.session() as conn:
+        conn.execute("DELETE FROM climate_days")
+    assert client.get("/api/frost").json()["status"] == "no_location"
+    client.patch("/api/settings", json={"weather_lat": 48.37, "weather_lon": 10.9})
+    r = client.get("/api/frost").json()
+    assert r["status"] == "ok" and r["error"] is None
+    assert r["years"] == [2006, 2025] and r["n"] == 20 and r["threshold"] == 0
+    # erst mit ERA5-Land versucht, dann ohne Modellangabe
+    assert clim.calls[0]["models"] == "era5_land" and "models" not in clim.calls[1]
+    assert clim.calls[1]["daily"] == "temperature_2m_min"
+    assert (clim.calls[1]["start_date"], clim.calls[1]["end_date"]) == ("2006-01-01", "2025-12-31")
+    y2025 = next(y for y in r["per_year"] if y["year"] == 2025)
+    assert y2025 == {"year": 2025, "spring": "2025-04-15", "autumn": "2025-10-06"}
+    assert r["stats"]["spring_median"] == "04-19" and r["stats"]["autumn_median"] == "10-10"
+    # Zweiter Aufruf aus dem Speicher; andere Grenze ohne neuen Abruf
+    n = len(clim.calls)
+    r2 = client.get("/api/frost?threshold=2").json()
+    assert len(clim.calls) == n
+    assert next(y for y in r2["per_year"] if y["year"] == 2025)["spring"] == "2025-04-22"
+    assert client.get("/api/frost?threshold=5").status_code == 400
+    # Einstellung bestimmt die Grenze, wenn keine angegeben ist
+    assert client.patch("/api/settings", json={"weather_frost": "2"}).status_code == 200
+    assert client.get("/api/frost").json()["threshold"] == 2
+    client.patch("/api/settings", json={"weather_frost": "0"})
+    # Neuer Standort: Statistik wird neu geladen
+    client.patch("/api/settings", json={"weather_lat": 50.0, "weather_lon": 8.0})
+    client.get("/api/frost")
+    assert len(clim.calls) > n
+    # abgeschaltet
+    client.patch("/api/settings", json={"weather_enabled": "0"})
+    assert client.get("/api/frost").json()["status"] == "off"
+    client.patch("/api/settings", json={"weather_enabled": "1"})
+
+
+def test_frost_archive_unreachable(client, fake):
+    weather._climate_tries.clear()
+    with db.session() as conn:
+        conn.execute("DELETE FROM climate_days")
+    client.patch("/api/settings", json={"weather_lat": 48.37, "weather_lon": 10.9})
+    fake.fail = True
+    r = client.get("/api/frost").json()
+    assert r["status"] == "ok" and r["stats"] == {} and "nicht erreichbar" in r["error"]
+    # nicht bei jedem Aufruf erneut anfragen
+    n = len(fake.calls)
+    client.get("/api/frost")
+    assert len(fake.calls) == n
