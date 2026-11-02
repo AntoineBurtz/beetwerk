@@ -80,6 +80,12 @@ function load(key, url, onLoad, onError) {
   return entry.data;
 }
 
+// Mittelwerte der letzten 20 Jahre (je Tag und Monat)
+export function climateFor(onLoad) {
+  if (!weatherEnabled()) return { status: "off" };
+  return load(`c|${cacheKey("")}`, "/api/climate", onLoad, (err) => ({ status: "error", error: err.message }));
+}
+
 export function weatherFor(year, onLoad) {
   if (!weatherEnabled()) return { status: "off", days: [] };
   return load(`w|${cacheKey(year)}`, `/api/weather?year=${year}`, onLoad,

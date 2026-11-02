@@ -5,6 +5,7 @@ import { mountMap } from "./map.js";
 import { mountTimeline } from "./timeline.js";
 import { mountPlantings } from "./plantings.js";
 import { mountCrops } from "./crops.js";
+import { mountWeather } from "./weatherpage.js";
 import { openSettings } from "./editor.js";
 
 const VIEWS = {
@@ -12,6 +13,7 @@ const VIEWS = {
   zeitleiste: mountTimeline,
   saetze: mountPlantings,
   kulturen: mountCrops,
+  wetter: mountWeather,
 };
 
 const root = document.getElementById("view");

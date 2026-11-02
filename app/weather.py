@@ -265,11 +265,50 @@ def frost_stats(springs: list[int | None], autumns: list[int | None]) -> dict:
     }
 
 
-def _climate_rows(first: date, last: date) -> dict[date, float]:
+CLIMATE_VARS = ["temperature_2m_min", "temperature_2m_max", "precipitation_sum", "et0_fao_evapotranspiration"]
+
+
+def _climate_rows(first: date, last: date) -> dict[date, dict]:
     with db.session() as conn:
-        rows = db.rows(conn, "SELECT day, tmin FROM climate_days WHERE day BETWEEN ? AND ?",
+        rows = db.rows(conn, "SELECT day, tmin, tmax, precip, et0 FROM climate_days WHERE day BETWEEN ? AND ?",
                        (first.isoformat(), last.isoformat()))
-    return {date.fromisoformat(r["day"]): r["tmin"] for r in rows}
+    return {date.fromisoformat(r["day"]): r for r in rows}
+
+
+def _ensure_climate(lat: float, lon: float, y0: int, y1: int) -> tuple[dict[date, dict], str | None]:
+    """Tageswerte der Vergleichsjahre; lädt einmalig aus dem Archiv, was fehlt."""
+    first, last = date(y0, 1, 1), date(y1, 12, 31)
+    rows = _climate_rows(first, last)
+    expected = (last - first).days + 1
+    complete = sum(1 for r in rows.values() if r["precip"] is not None and r["tmin"] is not None)
+    tried = _climate_tries.get((y0, y1))
+    error = None
+    if complete < expected * 0.98 and (tried is None or now() - tried > REFRESH):
+        _climate_tries[(y0, y1)] = now()
+        params = {"latitude": lat, "longitude": lon, "daily": ",".join(CLIMATE_VARS), "timezone": "auto",
+                  "start_date": first.isoformat(), "end_date": last.isoformat()}
+        payload = None
+        try:
+            payload = _fetch_json(ARCHIVE_URL, {**params, "models": CLIMATE_MODEL})
+        except WeatherError:
+            try:  # falls das Modell nicht angeboten wird: Standardauswahl von Open-Meteo
+                payload = _fetch_json(ARCHIVE_URL, params)
+            except WeatherError as exc:
+                error = str(exc)
+        if payload:
+            d = payload.get("daily") or {}
+            days = d.get("time") or []
+            col = lambda k: d.get(k) or [None] * len(days)  # noqa: E731
+            data = [(day, tn, tx, p, e) for day, tn, tx, p, e in zip(
+                days, col("temperature_2m_min"), col("temperature_2m_max"), col("precipitation_sum"),
+                col("et0_fao_evapotranspiration")) if tn is not None]
+            with db.session() as conn:
+                conn.executemany(
+                    """INSERT INTO climate_days(day, tmin, tmax, precip, et0) VALUES (?, ?, ?, ?, ?)
+                       ON CONFLICT(day) DO UPDATE SET tmin = excluded.tmin, tmax = excluded.tmax,
+                         precip = excluded.precip, et0 = excluded.et0""", data)
+            rows = _climate_rows(first, last)
+    return rows, error
 
 
 def frost_data(threshold: float | None = None) -> dict:
@@ -286,31 +325,8 @@ def frost_data(threshold: float | None = None) -> dict:
     if status != "ok":
         return {**base, "status": status}
     lat, lon = loc
-    first, last = date(y0, 1, 1), date(y1, 12, 31)
-    tmins = _climate_rows(first, last)
-    expected = (last - first).days + 1
-    key = (y0, y1)
-    tried = _climate_tries.get(key)
-    error = None
-    if len(tmins) < expected * 0.98 and (tried is None or now() - tried > REFRESH):
-        _climate_tries[key] = now()
-        params = {"latitude": lat, "longitude": lon, "daily": "temperature_2m_min", "timezone": "auto",
-                  "start_date": first.isoformat(), "end_date": last.isoformat()}
-        payload = None
-        try:
-            payload = _fetch_json(ARCHIVE_URL, {**params, "models": CLIMATE_MODEL})
-        except WeatherError:
-            try:  # falls das Modell nicht angeboten wird: Standardauswahl von Open-Meteo
-                payload = _fetch_json(ARCHIVE_URL, params)
-            except WeatherError as exc:
-                error = str(exc)
-        if payload:
-            d = payload.get("daily") or {}
-            pairs = [(day, v) for day, v in zip(d.get("time") or [], d.get("temperature_2m_min") or []) if v is not None]
-            with db.session() as conn:
-                conn.executemany("INSERT INTO climate_days(day, tmin) VALUES (?, ?) "
-                                 "ON CONFLICT(day) DO UPDATE SET tmin = excluded.tmin", pairs)
-            tmins = _climate_rows(first, last)
+    rows, error = _ensure_climate(lat, lon, y0, y1)
+    tmins = {d: r["tmin"] for d, r in rows.items()}
     years = sorted({d.year for d in tmins})
     # Nur vollständige Jahre zählen
     years = [y for y in years if sum(1 for d in tmins if d.year == y) >= 360]
@@ -326,3 +342,88 @@ def frost_data(threshold: float | None = None) -> dict:
             "location": {"lat": lat, "lon": lon},
             "per_year": per_year, "spring": [_mmdd(v) for v in springs], "autumn": [_mmdd(v) for v in autumns],
             "stats": frost_stats(springs, autumns), "error": error}
+
+
+# ---------------------------------------------------------------- Vergleichswerte (Mittel der Vorjahre)
+
+def _smooth(values: list[float | None], window: int = 15) -> list[float | None]:
+    """Gleitendes Mittel über das Jahr (rund um Silvester fortgesetzt)."""
+    n, half = len(values), window // 2
+    out = []
+    for i in range(n):
+        win = [values[(i + k) % n] for k in range(-half, half + 1)]
+        win = [v for v in win if v is not None]
+        out.append(round(sum(win) / len(win), 2) if win else None)
+    return out
+
+
+def climate_normals(rows: dict[date, dict]) -> dict:
+    """Mittel je Tag im Jahr (ohne Schalttag) und je Monat aus vollständigen Jahren."""
+    years = sorted({d.year for d in rows})
+    per_year_count: dict[int, int] = {}
+    for d, r in rows.items():
+        if r["precip"] is not None:
+            per_year_count[d.year] = per_year_count.get(d.year, 0) + 1
+    years = [y for y in years if per_year_count.get(y, 0) >= 360]
+    if not years:
+        return {}
+    n = len(years)
+    buckets = {k: [[] for _ in range(365)] for k in ("tmin", "tmax", "precip", "et0")}
+    for d, r in rows.items():
+        if d.year not in years or (d.month == 2 and d.day == 29):
+            continue
+        i = _norm(d)
+        for k in buckets:
+            if r[k] is not None:
+                buckets[k][i].append(r[k])
+    mean = {k: [sum(v) / len(v) if v else None for v in b] for k, b in buckets.items()}
+    cum, total = [], 0.0
+    for v in mean["precip"]:
+        total += v or 0
+        cum.append(round(total, 1))
+    by_month: dict[tuple[int, int], list[dict]] = {}
+    for d, r in rows.items():
+        by_month.setdefault((d.year, d.month), []).append(r)
+    months = []
+    for m in range(1, 13):
+        per_year = []
+        for y in years:
+            days = by_month.get((y, m), [])
+            prec = [r["precip"] for r in days if r["precip"] is not None]
+            per_year.append({
+                "precip": sum(prec),
+                "rain_days": sum(1 for v in prec if v >= 1.0),
+                "frost_days": sum(1 for r in days if r["tmin"] is not None and r["tmin"] < 0),
+                "et0": sum(r["et0"] or 0 for r in days),
+                "tmax": [r["tmax"] for r in days if r["tmax"] is not None],
+                "tmin": [r["tmin"] for r in days if r["tmin"] is not None],
+            })
+        avg = lambda key: round(sum(p[key] for p in per_year) / n, 1)  # noqa: E731
+        months.append({
+            "month": m, "precip": avg("precip"), "rain_days": avg("rain_days"), "frost_days": avg("frost_days"),
+            "et0": avg("et0"),
+            "tmax": round(sum(sum(p["tmax"]) / len(p["tmax"]) for p in per_year if p["tmax"]) / n, 1),
+            "tmin": round(sum(sum(p["tmin"]) / len(p["tmin"]) for p in per_year if p["tmin"]) / n, 1),
+        })
+    return {
+        "years": [years[0], years[-1]], "n": n,
+        "daily": {"tmin": _smooth(mean["tmin"]), "tmax": _smooth(mean["tmax"]),
+                  "et0": _smooth(mean["et0"]), "precip_cum": cum},
+        "months": months,
+        "year_precip": round(sum(m["precip"] for m in months)),
+    }
+
+
+def climate_data() -> dict:
+    settings = _read_settings()
+    t = today()
+    y0, y1 = t.year - CLIMATE_YEARS, t.year - 1
+    base = {"attribution": ATTRIBUTION, "years": [y0, y1], "error": None}
+    status, loc = _prepare(settings)
+    if status != "ok":
+        return {**base, "status": status}
+    rows, error = _ensure_climate(loc[0], loc[1], y0, y1)
+    normals = climate_normals(rows)
+    if not normals:
+        return {**base, "status": "ok", "error": error or "Keine Vergleichsdaten im Archiv"}
+    return {**base, "status": "ok", **normals, "error": error}
