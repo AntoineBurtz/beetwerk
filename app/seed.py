@@ -47,6 +47,13 @@ CROPS = [
 ]
 
 
+def guess_trait_groups(conn: sqlite3.Connection) -> None:
+    """Tomaten und Paprika/Chili bekommen ihre Bonitur-Merkmale (am Namen erkannt)."""
+    conn.execute("UPDATE crops SET trait_group = 'tomato' WHERE trait_group = '' AND lower(name) LIKE '%tomat%'")
+    for word in ("paprika", "chili", "peperon", "pfefferon", "capsicum"):
+        conn.execute("UPDATE crops SET trait_group = 'pepper' WHERE trait_group = '' AND lower(name) LIKE ?", (f"%{word}%",))
+
+
 def seed_crops(conn: sqlite3.Connection) -> None:
     conn.executemany(
         """INSERT INTO crops(name, family, color, method, nursery_days, field_days,

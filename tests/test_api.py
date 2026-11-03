@@ -140,4 +140,5 @@ def test_migration_adds_columns(tmp_path):
     dbmod.migrate(conn)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(plantings)")}
     assert {"varieties", "fill", "fill_start"} <= cols
-    dbmod.migrate(conn)  # zweimal ausführen schadet nicht
+    assert "trait_group" in {r[1] for r in conn.execute("PRAGMA table_info(crops)")}
+    assert dbmod.migrate(conn) == set()  # zweimal ausführen schadet nicht

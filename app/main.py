@@ -16,13 +16,13 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import db, geo, weather
-from .seed import seed_demo
+from . import bonitur, db, geo, weather
+from .seed import guess_trait_groups, seed_demo
 
 VERSION = "1.1.0"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 IMAGE_PATH = db.DATA_DIR / "imagery" / "garden.jpg"
-INTERNAL_SETTINGS = {"geo", "imagery_custom", *weather.STATE_KEYS}
+INTERNAL_SETTINGS = {"geo", "imagery_custom", bonitur.SEEDED_KEY, *weather.STATE_KEYS}
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -97,6 +97,7 @@ class CropIn(BaseModel):
     row_spacing: Optional[int] = Field(None, ge=1, le=500)
     plant_spacing: Optional[int] = Field(None, ge=1, le=500)
     notes: Optional[str] = None
+    trait_group: Optional[Literal["", "tomato", "pepper"]] = None  # Bonitur-Merkmale der Kultur
 
 
 class VarietyIn(BaseModel):
@@ -197,7 +198,7 @@ class ImageIn(BaseModel):
 
 BED_DEFAULTS = dict(name="Neues Beet", kind="bed", x=1.0, y=1.0, length=4.0, width=1.2, rotation=0.0, sort=0, notes="")
 CROP_DEFAULTS = dict(name="Neue Kultur", family="", color="#6a9b3c", method="direct", nursery_days=0,
-                     field_days=60, harvest_days=21, row_spacing=30, plant_spacing=30, notes="")
+                     field_days=60, harvest_days=21, row_spacing=30, plant_spacing=30, notes="", trait_group="")
 PLANTING_DEFAULTS = dict(variety="", bed_id=None, method="direct", plant_date=None, start=0.0, len=1.0,
                          offset=0.0, span=None, rows=None, row_spacing=None, plant_spacing=None,
                          sown_done=False, planted_done=False, harvest_done=False, notes="",
@@ -436,6 +437,11 @@ def update_planting(planting_id: int, body: PlantingIn):
 def delete_planting(planting_id: int):
     with db.session() as conn:
         _get(conn, "plantings", planting_id)
+        used = conn.execute("SELECT COUNT(*) FROM observations WHERE planting_id = ?", (planting_id,)).fetchone()[0]
+        if used:
+            _err(409, f"Für diesen Satz gibt es {used} {'Boniturwert' if used == 1 else 'Boniturwerte'}. "
+                      "Lösche zuerst die Werte in der Bonitur oder behalte den Satz.")
+        conn.execute("DELETE FROM plants WHERE planting_id = ?", (planting_id,))
         conn.execute("DELETE FROM plantings WHERE id = ?", (planting_id,))
     return Response(status_code=204)
 
@@ -479,6 +485,7 @@ def export_all():
     data = all_data()
     with db.session() as conn:
         data["settings"] = {k: v for k, v in _settings(conn).items() if k not in weather.STATE_KEYS}
+        data.update(bonitur.export_tables(conn))
     data.pop("geo", None)
     data.pop("imagery", None)
     data["format"] = "beetwerk"
@@ -496,6 +503,7 @@ async def import_all(request: Request):
     if not isinstance(data, dict) or data.get("format") != "beetwerk":
         _err(400, "Das ist keine Beetwerk-Sicherung")
     with db.session() as conn:
+        bonitur.clear_tables(conn)
         conn.execute("DELETE FROM plantings")
         conn.execute("DELETE FROM beds")
         conn.execute("DELETE FROM crops")
@@ -515,6 +523,9 @@ async def import_all(request: Request):
                     f"INSERT INTO {table}({', '.join(record)}) VALUES ({', '.join('?' for _ in record)})",
                     list(record.values()),
                 )
+        if any("trait_group" not in c for c in data.get("crops") or []):
+            guess_trait_groups(conn)  # ältere Sicherung ohne Bonitur-Zuordnung
+        bonitur.import_tables(conn, data)
         for key, value in db.DEFAULT_SETTINGS.items():
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
     return all_data()
@@ -526,6 +537,7 @@ def load_demo(replace: bool = False):
         has_beds = conn.execute("SELECT COUNT(*) FROM beds").fetchone()[0] > 0
         if has_beds and not replace:
             _err(409, "Es gibt schon Beete. Zum Ersetzen replace=true mitschicken.")
+        bonitur.clear_tables(conn)
         conn.execute("DELETE FROM plantings")
         conn.execute("DELETE FROM beds")
         if not geo.loads(_settings(conn).get("geo")):
@@ -618,6 +630,7 @@ def delete_garden_geo():
     return all_data()
 
 
-# ---------------------------------------------------------------- Oberfläche
+# ---------------------------------------------------------------- Bonitur und Oberfläche
 
+app.include_router(bonitur.router)
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

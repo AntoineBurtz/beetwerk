@@ -12,6 +12,7 @@ import {
 import { iconBtn, icon, toast, confirmDialog, replaceKeepingFocus } from "./ui.js";
 import { bedProperties, bedUsage, miniTimeline } from "./bedpanel.js";
 import { openGeoSetup } from "./geosetup.js";
+import { openBonitur } from "./bonitur.js";
 
 const U = 100; // SVG-Einheiten pro Meter, also Zentimeter
 const UPCOMING_DAYS = 21;
@@ -1177,6 +1178,7 @@ export function mountMap(root) {
         h("button", { type: "button", class: "btn btn-sm btn-primary", onclick: () => setMode({ type: "planting", id: p.id }) }, "Auf ein Beet setzen")),
       h("div", { class: "actions" },
         h("button", { type: "button", class: "btn btn-sm", onclick: () => createSuccession(p, 14), title: "Gleiche Kultur 14 Tage später" }, icon("copy"), "Folgesatz"),
+        crop?.trait_group ? h("button", { type: "button", class: "btn btn-sm", onclick: () => openBonitur(p.id), title: "Pflanzen dieses Satzes bonitieren" }, "Bonitieren") : null,
         bed ? h("button", { type: "button", class: "btn btn-sm btn-quiet", onclick: () => select({ type: "bed", id: bed.id }) }, `${bed.name} zeigen`) : null,
         h("button", { type: "button", class: "btn btn-sm btn-danger", onclick: deleteSelected }, icon("trash"), "Löschen")),
     )];

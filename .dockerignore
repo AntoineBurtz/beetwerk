@@ -6,3 +6,5 @@ tests/
 .github/
 unraid/
 .pytest_cache/
+assets/
+tools/
