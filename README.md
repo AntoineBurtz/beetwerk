@@ -19,6 +19,7 @@ Dazu gibt es:
 - Wetterband in der Zeitleiste: Regen, Frost und Wasserbilanz mit empfohlenen Gießtagen (Daten von Open-Meteo).
 - Wetter-Seite mit Diagrammen und Monatstabelle, jeweils im Vergleich zum Mittel der letzten 20 Jahre.
 - Mischsatz: viele Sorten einer Kultur (z. B. 15 Tomatensorten zu je 4 bis 10 Pflanzen) als ein Satz, mit Sortenliste, Pflanzschema und Pflanzplan zum Herunterladen.
+- Bonitur: Pflanzen einzeln oder als Block bewerten, mit BBCH-Bildern, Merkmalen nach UPOV für Tomate und Paprika/Chili, Sortenvergleich und CSV-Export.
 
 ## Wetter und Gießen
 
@@ -83,6 +84,26 @@ Auf der Karte bekommt jede Sorte eine Farbe und einen Buchstaben, in der Zeitlei
 
 Jede Sorte hat neben Name und Anzahl ein freies Feld `ref` für eine spätere Verknüpfung mit einer Sortendatenbank wie Baserow.
 
+## Bonitur
+
+Der Reiter **Bonitur** ist fürs Handy im Beet gedacht. Bonitiert wird an einem eigenen Datum (oben, Standard heute), unabhängig vom Stichtag der Planung.
+
+1. **Satz wählen.** Die Liste zeigt die Sätze des Jahres; Tomaten, Paprika und Chili stehen vorne. Welche Kultur welche Merkmale bekommt, steht im Kultur-Dialog unter „Bonitur-Merkmale“ (Tomate, Paprika und Chili oder nur allgemeine). Aus der Karte führt „Bonitieren“ in der Seitenleiste direkt hierher.
+2. **Pflanzen festlegen.** Beim ersten Öffnen übernimmt Beetwerk den Pflanzplan und gibt jeder Pflanze eine feste Nummer mit Sorte, Reihe und Platz. Danach ändert ein Umsortieren der Sorten nichts mehr an der Zuordnung. Unter „Pflanzen“ trägst du die Etiketten-IDs ein (einzeln oder als kopierte Spalte), fügst Pflanzen hinzu oder markierst ausgefallene.
+3. **Was bonitierst du?** Einzelne Pflanzen im Raster antippen oder als Block wählen (alle, eine Sorte, eine Reihe). Für Merkmale, die zur Sorte gehören, auf „Ganze Sorte“ umschalten.
+4. **Merkmale** einzeln wählen oder als Vorlage („Rundgang“, „Ernte“, „Fruchtmerkmale“, „Verkostung“, „Saatgut“; eigene Auswahl lässt sich als Vorlage speichern). „Jetzt fällig“ wählt die einmaligen Merkmale, deren Zeitpunkt nach dem zuletzt erfassten BBCH-Stadium gekommen ist und die noch fehlen.
+5. **Werte eingeben.** „Ein Wert für alle“ speichert denselben Wert für jede gewählte Pflanze. „Pflanze für Pflanze“ geht mit „Speichern und weiter“ durch die Auswahl; die Werte der vorigen Pflanze sind vorbelegt, die aktuelle Pflanze ist im Raster gelb umrandet.
+
+Regelmäßige Merkmale (BBCH, Höhe, Wuchskraft, Befall, Ernte) sammeln einen Verlauf, ein zweiter Wert am selben Tag ersetzt den ersten. Einmalige Merkmale gelten als erledigt, sobald ein Wert da ist, und bleiben änderbar. Fruchtgewicht und -maße lassen sich als Einzelwerte eingeben; Beetwerk speichert das Mittel und die Einzelwerte. Fotos werden vor dem Hochladen verkleinert und im Datenordner unter `photos/` abgelegt.
+
+Die **Übersicht** zeigt je Pflanze das aktuelle Stadium, Höhe, Blüh- und Reifebeginn (erster Tag mit BBCH 61 bzw. 81), Ernte und wie viele einmalige Merkmale erfasst sind; ein Klick öffnet den Verlauf zum Ändern und Löschen. „Sorten vergleichen“ stellt die Sorten nebeneinander: Blüh- und Reifebeginn in Tagen ab Pflanzung, Ertrag je Pflanze, mittleres Fruchtgewicht, Anteil aussortierter Früchte und alle einmaligen Merkmale. „CSV“ lädt alle Werte des Jahres als Tabelle (Semikolon, Dezimalkomma) herunter, je Wert eine Zeile.
+
+Unter **Merkmale** lassen sich Merkmale ausschalten, eigene anlegen und Vorlagen löschen. Die eingebauten Merkmale folgen den UPOV-Prüfrichtlinien TG/44 (Tomate) und TG/76 (Paprika), ergänzt um Verkostung sowie Kreuzung und Saatgut.
+
+Die BBCH-Zeichnungen liegen im Original unter `assets/bbch/<kultur>/` (Dateiname mit `BBCH<code>`, z. B. `SoLy-BBCH61.png`). `python tools/bbch_images.py` erzeugt daraus kleine WebP-Bilder für die App. Für Paprika und Chili gelten die Tomatenbilder, bis ein Ordner `assets/bbch/paprika/` dazukommt.
+
+Jede Pflanze, jedes Merkmal und jeder Wert hat eine feste Nummer, Werte zusätzlich Zeitstempel für Änderungen (`updated_at`, `synced_at`). Darauf baut der spätere Abgleich mit Baserow auf.
+
 ## Grundstück auf dem Luftbild
 
 Unter **Einstellungen → Grundstück** oder in der Seitenleiste der Karte. Die Einrichtung läuft in vier Schritten:
@@ -146,7 +167,7 @@ docker compose up -d
 
 Danach im Browser `http://<server>:8000` öffnen. Beim ersten Start ist der Garten leer; unter **Einstellungen** (Regler-Symbol oben rechts) oder im leeren Garten selbst lässt sich ein Beispielgarten laden.
 
-Die Datenbank ist eine SQLite-Datei (`beetwerk.db` im Datenordner). Für Backups reicht es, diese Datei zu kopieren, oder du lädst unter Einstellungen eine JSON-Sicherung herunter.
+Die Datenbank ist eine SQLite-Datei (`beetwerk.db` im Datenordner). Für Backups reicht es, diese Datei zu kopieren, oder du lädst unter Einstellungen eine JSON-Sicherung herunter. Die JSON-Sicherung enthält auch Pflanzen und Boniturwerte, aber keine Fotos; die liegen im Datenordner unter `photos/`.
 
 ### Passwortschutz
 
@@ -203,6 +224,15 @@ Die REST-API ist unter `/api/docs` dokumentiert. Wichtige Endpunkte:
 - `GET /api/frost?threshold=0` liefert je Jahr den letzten und ersten Frosttag der letzten 20 Jahre samt Statistik
 - `GET /api/weather?year=2026` liefert die gespeicherten Tageswerte (Niederschlag, Tiefst- und Höchsttemperatur, ET₀, Vorhersage ja/nein) und lädt bei Bedarf nach
 
+Bonitur:
+
+- `GET /api/bonitur?year=2026` liefert Merkmale, Vorlagen sowie Pflanzen und Werte der Sätze des Jahres
+- `POST /api/plantings/{id}/plants` legt die Pflanzen eines Satzes fest, `POST/PATCH/DELETE /api/plants`, `PUT /api/plantings/{id}/labels` für Etiketten
+- `POST /api/observations` speichert Werte (`{"entries": [{"trait_id", "planting_id", "plant_id" oder "variety", "date", "value"}]}`), `PATCH/DELETE /api/observations/{id}`
+- `POST /api/photos` (Bild als Rohdaten), `GET /api/photos/{name}`
+- `GET /api/bonitur.csv?year=2026`
+- `POST/PATCH/DELETE /api/traits` und `/api/trait-sets` für eigene Merkmale und Vorlagen
+
 Ein Mischsatz trägt `varieties` (Liste aus `{"name", "count", "ref"}`), `fill` (`snake` oder `columns`) und `fill_start` (`tl`, `tr`, `bl`, `br`). Eine leere Liste macht ihn wieder zum normalen Satz mit `variety`.
 
 Damit lässt sich z. B. aus Home Assistant oder einem Skript abfragen, was diese Woche zu säen ist, oder eine Sortenliste aus Baserow übernehmen.
@@ -223,7 +253,8 @@ Aufbau:
 - `app/db.py`: SQLite-Schema
 - `app/seed.py`: Kulturen und Beispielgarten
 - `app/geo.py`: Koordinaten zwischen Grundstück und Erde, Luftbild-Abruf
-- `app/static/`: Oberfläche ohne Build-Schritt, reines JavaScript mit ES-Modulen (`map.js` Beetkarte, `timeline.js` Zeitleiste, `plantings.js` Sätze und Aufgaben, `editor.js` Dialoge, `geosetup.js` Grundstück auf dem Luftbild, `store.js` Zustand und Rückgängig)
+- `app/bonitur.py`: Merkmalkatalog, Einzelpflanzen, Boniturwerte, Fotos und CSV
+- `app/static/`: Oberfläche ohne Build-Schritt, reines JavaScript mit ES-Modulen (`map.js` Beetkarte, `timeline.js` Zeitleiste, `plantings.js` Sätze und Aufgaben, `editor.js` Dialoge, `geosetup.js` Grundstück auf dem Luftbild, `bonitur.js` Bonitur mit `bstore.js` und `bwidgets.js`, `store.js` Zustand und Rückgängig)
 - `docker-entrypoint.py`: übergibt den Datenordner an PUID/PGID und startet ohne root
 - `unraid/beetwerk.xml`: Vorlage für Unraid
 - `.github/workflows/image.yml`: Tests und Image-Build

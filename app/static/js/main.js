@@ -6,6 +6,7 @@ import { mountTimeline } from "./timeline.js";
 import { mountPlantings } from "./plantings.js";
 import { mountCrops } from "./crops.js";
 import { mountWeather } from "./weatherpage.js";
+import { mountBonitur } from "./bonitur.js";
 import { openSettings } from "./editor.js";
 
 const VIEWS = {
@@ -14,6 +15,7 @@ const VIEWS = {
   saetze: mountPlantings,
   kulturen: mountCrops,
   wetter: mountWeather,
+  bonitur: mountBonitur,
 };
 
 const root = document.getElementById("view");
@@ -27,6 +29,7 @@ function route() {
   current?.destroy?.();
   root.replaceChildren();
   currentName = viewName;
+  document.body.dataset.view = viewName;
   if (state.mode && viewName !== "karte") setMode(null);
   current = VIEWS[viewName](root);
   for (const a of document.querySelectorAll(".tabs a")) {

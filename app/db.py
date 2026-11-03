@@ -84,8 +84,74 @@ CREATE TABLE IF NOT EXISTS climate_days (
     tmin REAL
 );
 
+-- Bonitur: Merkmalkatalog, Vorlagen, Einzelpflanzen und Beobachtungen
+CREATE TABLE IF NOT EXISTS traits (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    key       TEXT    NOT NULL UNIQUE,
+    name      TEXT    NOT NULL,
+    grp       TEXT    NOT NULL DEFAULT 'all',     -- all | tomato | pepper
+    section   TEXT    NOT NULL DEFAULT 'plant',   -- regular | plant | flower | fruit | taste | breeding
+    freq      TEXT    NOT NULL DEFAULT 'once',    -- repeat | once | event
+    level     TEXT    NOT NULL DEFAULT 'plant',   -- plant | variety | both
+    type      TEXT    NOT NULL,                   -- bbch | score | choice | multi | number | text | photo | rated | cross | amount
+    options   TEXT    NOT NULL DEFAULT '',        -- JSON: Auswahlwerte oder Beschriftung der Noten
+    unit      TEXT    NOT NULL DEFAULT '',
+    min       REAL,
+    max       REAL,
+    samples   INTEGER NOT NULL DEFAULT 0,         -- Mittel aus so vielen Einzelwerten
+    bbch_from INTEGER,                            -- passender Zeitpunkt als BBCH-Bereich
+    bbch_to   INTEGER,
+    stage     TEXT    NOT NULL DEFAULT '',        -- Zeitpunkt in Worten
+    hint      TEXT    NOT NULL DEFAULT '',
+    ref       TEXT    NOT NULL DEFAULT '',        -- Vorlage, z. B. UPOV-Merkmal
+    sort      INTEGER NOT NULL DEFAULT 0,
+    active    INTEGER NOT NULL DEFAULT 1,
+    builtin   INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS trait_sets (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    name    TEXT    NOT NULL,
+    keys    TEXT    NOT NULL DEFAULT '[]',        -- JSON-Liste von Merkmal-Schlüsseln
+    sort    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS plants (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    planting_id INTEGER NOT NULL REFERENCES plantings(id),
+    num         INTEGER NOT NULL,                 -- laufende Nummer im Satz
+    variety     TEXT    NOT NULL DEFAULT '',
+    variety_ref TEXT    NOT NULL DEFAULT '',
+    row         INTEGER,
+    place       INTEGER,
+    label       TEXT    NOT NULL DEFAULT '',      -- eigene ID vom Pflanzenetikett, später als QR-Code
+    status      TEXT    NOT NULL DEFAULT 'ok',    -- ok | gone
+    note        TEXT    NOT NULL DEFAULT '',
+    created_at  TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS observations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    trait_id    INTEGER NOT NULL REFERENCES traits(id),
+    planting_id INTEGER NOT NULL REFERENCES plantings(id),
+    plant_id    INTEGER REFERENCES plants(id),    -- leer = Wert gilt für die ganze Sorte im Satz
+    variety     TEXT    NOT NULL DEFAULT '',
+    date        TEXT    NOT NULL,
+    value       TEXT    NOT NULL DEFAULT 'null',  -- JSON
+    parts       TEXT    NOT NULL DEFAULT '',      -- JSON: Einzelwerte, aus denen das Mittel stammt
+    note        TEXT    NOT NULL DEFAULT '',
+    photo       TEXT    NOT NULL DEFAULT '',
+    created_at  TEXT    NOT NULL,
+    updated_at  TEXT    NOT NULL,
+    synced_at   TEXT                              -- für den späteren Abgleich mit Baserow
+);
+
 CREATE INDEX IF NOT EXISTS plantings_bed  ON plantings(bed_id);
 CREATE INDEX IF NOT EXISTS plantings_crop ON plantings(crop_id);
+CREATE INDEX IF NOT EXISTS plants_planting ON plants(planting_id);
+CREATE UNIQUE INDEX IF NOT EXISTS plants_label ON plants(label) WHERE label <> '';
+CREATE INDEX IF NOT EXISTS obs_planting ON observations(planting_id);
+CREATE INDEX IF NOT EXISTS obs_plant ON observations(plant_id);
 """
 
 DEFAULT_SETTINGS = {
@@ -117,7 +183,8 @@ def session():
 
 
 def init_db() -> None:
-    from .seed import seed_crops
+    from .bonitur import seed_traits
+    from .seed import guess_trait_groups, seed_crops
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if not os.access(DATA_DIR, os.W_OK):
@@ -127,12 +194,16 @@ def init_db() -> None:
         )
     with session() as conn:
         conn.executescript(SCHEMA)
-        migrate(conn)
+        added = migrate(conn)
         conn.execute("PRAGMA journal_mode = WAL")
         for key, value in DEFAULT_SETTINGS.items():
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
         if conn.execute("SELECT COUNT(*) FROM crops").fetchone()[0] == 0:
             seed_crops(conn)
+            guess_trait_groups(conn)
+        elif ("crops", "trait_group") in added:
+            guess_trait_groups(conn)
+        seed_traits(conn)
 
 
 # Spalten, die nach der ersten Version dazugekommen sind
@@ -142,6 +213,9 @@ MIGRATIONS = {
         ("precip", "REAL"),
         ("et0", "REAL"),
     ],
+    "crops": [
+        ("trait_group", "TEXT NOT NULL DEFAULT ''"),   # Bonitur-Merkmale: '' | tomato | pepper
+    ],
     "plantings": [
         ("varieties", "TEXT NOT NULL DEFAULT ''"),     # Mischsatz: JSON-Liste [{name, count, ref?}]
         ("fill", "TEXT NOT NULL DEFAULT 'snake'"),     # Pflanzschema: snake | columns
@@ -150,12 +224,15 @@ MIGRATIONS = {
 }
 
 
-def migrate(conn: sqlite3.Connection) -> None:
+def migrate(conn: sqlite3.Connection) -> set[tuple[str, str]]:
+    added = set()
     for table, columns in MIGRATIONS.items():
         existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         for name, decl in columns:
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+                added.add((table, name))
+    return added
 
 
 def rows(conn: sqlite3.Connection, sql: str, params=()) -> list[dict]:

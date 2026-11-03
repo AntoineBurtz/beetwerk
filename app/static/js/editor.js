@@ -9,7 +9,7 @@ import { mixEditor } from "./mix.js";
 import { SOILS, soilOf, FROST_OPTIONS, frostSummary } from "./weather.js";
 import { openGeoSetup } from "./geosetup.js";
 
-function shell(title, { onSubmit, extraHead } = {}) {
+export function shell(title, { onSubmit, extraHead } = {}) {
   const dlg = h("dialog");
   const body = h("div", { class: "dlg-body" });
   const foot = h("div", { class: "dlg-foot" });
@@ -45,7 +45,7 @@ function shell(title, { onSubmit, extraHead } = {}) {
   return { dlg, form, body, foot, showError, open: () => dlg.showModal() };
 }
 
-function field(label, input, hint) {
+export function field(label, input, hint) {
   return h("label", { class: "field" }, h("span", {}, label), input, hint ? h("span", { class: "hint" }, hint) : null);
 }
 
@@ -406,6 +406,7 @@ export function openBedEditor(bed, defaults = {}) {
         x: num(x.value) ?? 0,
         y: num(y.value) ?? 0,
         notes: notes.value,
+        trait_group: traitGroup.value,
       };
       if (!payload.name) throw new Error("Bitte einen Namen eingeben");
       if (!(payload.length > 0) || !(payload.width > 0)) throw new Error("Länge und Breite müssen größer als 0 sein");
@@ -464,6 +465,9 @@ export function openCropEditor(crop) {
   const rowSp = h("input", { name: "row_spacing", inputmode: "numeric", value: c.row_spacing });
   const plantSp = h("input", { name: "plant_spacing", inputmode: "numeric", value: c.plant_spacing });
   const notes = h("textarea", { name: "notes" }, c.notes || "");
+  const traitGroup = h("select", { name: "trait_group" },
+    [["", "nur allgemeine Merkmale"], ["tomato", "Tomate"], ["pepper", "Paprika und Chili"]]
+      .map(([k, label]) => h("option", { value: k, selected: (c.trait_group || "") === k }, label)));
 
   const ui = shell(isNew ? "Neue Kultur" : c.name, {
     onSubmit: async () => {
@@ -483,6 +487,7 @@ export function openCropEditor(crop) {
         row_spacing: intOf(rowSp, "Reihenabstand", 1),
         plant_spacing: intOf(plantSp, "Pflanzabstand", 1),
         notes: notes.value,
+        trait_group: traitGroup.value,
       };
       if (!payload.name) throw new Error("Bitte einen Namen eingeben");
       if (isNew) await create("crops", payload);
@@ -502,6 +507,7 @@ export function openCropEditor(crop) {
     h("fieldset", {},
       h("legend", {}, "Abstände in cm"),
       h("div", { class: "grid-2" }, field("Reihenabstand", rowSp), field("Pflanzabstand in der Reihe", plantSp))),
+    field("Bonitur-Merkmale", traitGroup, "Welche Merkmale die Bonitur für diese Kultur anbietet"),
     field("Notizen", notes),
   );
   const used = isNew ? 0 : state.plantings.filter((p) => p.crop_id === c.id).length;
