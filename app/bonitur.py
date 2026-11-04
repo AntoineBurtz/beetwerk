@@ -914,19 +914,27 @@ def delete_observation(obs_id: int):
 @router.post("/api/photos", status_code=201)
 async def upload_photo(request: Request):
     """Foto als Rohdaten (image/jpeg, png, webp, heic soweit Pillow es kann). Gespeichert wird ein JPEG."""
-    from PIL import Image, ImageOps, UnidentifiedImageError
-
     raw = await request.body()
     if not raw:
         _err(422, "Kein Foto empfangen")
+    try:
+        return {"name": save_photo(raw)}
+    except ValueError as exc:
+        _err(413 if "zu groß" in str(exc) else 422, str(exc))
+
+
+def save_photo(raw: bytes) -> str:
+    """Bild prüfen, als JPEG mit Vorschaubild ablegen; liefert den Namen. ValueError bei Unbrauchbarem."""
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
     if len(raw) > PHOTO_MAX_BYTES:
-        _err(413, "Das Foto ist zu groß (höchstens 25 MB)")
+        raise ValueError("Das Foto ist zu groß (höchstens 25 MB)")
     try:
         img = Image.open(io.BytesIO(raw))
         img = ImageOps.exif_transpose(img)
         img = img.convert("RGB")
-    except (UnidentifiedImageError, OSError):
-        _err(422, "Das ist kein lesbares Bild")
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError("Das ist kein lesbares Bild") from exc
     PHOTO_DIR.mkdir(parents=True, exist_ok=True)
     name = secrets.token_hex(10)
     full = img.copy()
@@ -934,7 +942,7 @@ async def upload_photo(request: Request):
     full.save(PHOTO_DIR / f"{name}.jpg", "JPEG", quality=85, optimize=True)
     img.thumbnail((THUMB_SIZE, THUMB_SIZE), Image.LANCZOS)
     img.save(PHOTO_DIR / f"{name}_t.jpg", "JPEG", quality=78, optimize=True)
-    return {"name": name}
+    return name
 
 
 @router.get("/api/photos/{name}")

@@ -1,0 +1,88 @@
+"""Künstliche Claude-Schnittstelle mit Websuche, dazu Wikimedia Commons und ein Saatgut-Shop.
+
+Aufruf für Versuche mit der Oberfläche:  python tests/fakeclaude.py 8794
+und Beetwerk mit BEETWERK_ANTHROPIC_URL=http://127.0.0.1:8794,
+BEETWERK_COMMONS_URL=http://127.0.0.1:8794/w/api.php und BEETWERK_ALLOW_PRIVATE_FETCH=1 starten.
+API-Schlüssel: sk-test
+"""
+import io
+import json
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+def _jpeg(color="#c0392b", size=(64, 48)):
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", size, color).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+class Fake(BaseHTTPRequestHandler):
+    """Claude-Schnittstelle, Wikimedia Commons und ein Saatgut-Shop in einem."""
+    calls: list = []
+    base = ""
+
+    def log_message(self, *args):
+        pass
+
+    def _send(self, status, body, ctype="application/json"):
+        data = body if isinstance(body, bytes) else json.dumps(body).encode("utf-8") if not isinstance(body, str) else body.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        if self.path.startswith("/w/api.php"):
+            return self._send(200, {"query": {"pages": {"1": {"index": 1, "imageinfo": [{
+                "url": f"{self.base}/img/commons.jpg", "thumburl": f"{self.base}/img/commons.jpg", "mime": "image/jpeg",
+                "descriptionurl": "https://commons.wikimedia.org/wiki/File:Ochsenherz.jpg",
+                "extmetadata": {"LicenseShortName": {"value": "CC BY-SA 4.0"}, "Artist": {"value": "<a>Gärtnerin</a>"}}}]}}}})
+        if self.path == "/shop/ochsenherz":
+            return self._send(200, f'<html><head><meta property="og:image" content="/img/shop.jpg"></head></html>',
+                              "text/html; charset=utf-8")
+        if self.path.startswith("/img/"):
+            return self._send(200, _jpeg(), "image/jpeg")
+        return self._send(404, {"error": "nicht da"})
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        Fake.calls.append({"headers": {k.lower(): v for k, v in self.headers.items()}, "body": body})
+        if self.headers.get("x-api-key") != "sk-test":
+            return self._send(401, {"type": "error", "error": {"type": "authentication_error", "message": "invalid x-api-key"}})
+        if body["max_tokens"] == 5:
+            return self._send(200, {"model": body["model"], "content": [{"type": "text", "text": "OK"}],
+                                    "stop_reason": "end_turn", "usage": {"input_tokens": 10, "output_tokens": 1}})
+        usage = {"input_tokens": 1000, "output_tokens": 200, "server_tool_use": {"web_search_requests": 1}}
+        if len(body["messages"]) == 1:  # erste Runde: Websuche, dann Pause
+            return self._send(200, {"stop_reason": "pause_turn", "usage": usage, "content": [
+                {"type": "server_tool_use", "id": "srv1", "name": "web_search", "input": {"query": "Ochsenherz Tomate"}},
+                {"type": "web_search_tool_result", "tool_use_id": "srv1", "content": [
+                    {"type": "web_search_result", "url": f"{self.base}/shop/ochsenherz", "title": "Ochsenherz – Shop",
+                     "encrypted_content": "x"}]}]})
+        prompt = json.dumps(body["messages"][0]["content"], ensure_ascii=False)
+        named = "Ochsenherz" if ("Ochsenherz" in prompt or '"type": "image"' in prompt) else "Unbekannte Sorte"
+        answer = {"name": named, "crop": "Tomate", "species": "Solanum lycopersicum", "kind": "Fleischtomate",
+                  "seed": "samenfest", "growth": "indeterminiert (Stabtomate)", "color": "rot",
+                  "maturity": "mittelspät", "supplier": "", "description": "Große, herzförmige Früchte.",
+                  "confidence": "hoch", "sources": [{"url": f"{self.base}/shop/ochsenherz", "title": "Shop"}],
+                  "images": []}
+        return self._send(200, {"stop_reason": "end_turn", "usage": usage, "content": [
+            {"type": "text", "text": "Hier das Ergebnis:\n```json\n" + json.dumps(answer, ensure_ascii=False) + "\n```"}]})
+
+
+
+def serve(port: int = 0):
+    srv = ThreadingHTTPServer(("127.0.0.1", port), Fake)
+    Fake.base = f"http://127.0.0.1:{srv.server_address[1]}"
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+if __name__ == "__main__":
+    srv = serve(int(sys.argv[1]) if len(sys.argv) > 1 else 8794)
+    print(f"Künstliches Claude auf {Fake.base}")
+    threading.Event().wait()

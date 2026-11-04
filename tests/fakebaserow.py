@@ -117,6 +117,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, [{"id": d["id"], "name": d["name"], "type": "database", "workspace": s.workspace,
                                          "tables": [{"id": t, "name": s.tables[t]["name"], "database_id": d["id"]}
                                                     for t in d["tables"]]} for d in s.databases.values()])
+            if path == "/api/database/tables/all-tables/" and method == "GET" and auth == "token":
+                return self._send(200, [{"id": t["id"], "name": t["name"], "database_id": t["database"]}
+                                        for t in s.tables.values()])
             m = re.fullmatch(r"/api/database/tables/database/(\d+)/", path)
             if m and method == "POST" and auth == "jwt":
                 data = json.loads(raw)

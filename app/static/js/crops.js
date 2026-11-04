@@ -2,14 +2,40 @@
 import { state } from "./store.js";
 import { h } from "./util.js";
 import { openCropEditor } from "./editor.js";
+import { varietiesView } from "./varieties.js";
+import { replaceKeepingFocus } from "./ui.js";
 
 let filter = "";
+let tab = (() => { try { return sessionStorage.getItem("beetwerk.cropsTab") || "kulturen"; } catch { return "kulturen"; } })();
+
+function tabs(render) {
+  const opt = (k, label) => {
+    const input = h("input", { type: "radio", name: "crops-tab", checked: tab === k });
+    input.addEventListener("change", () => {
+      tab = k;
+      try { sessionStorage.setItem("beetwerk.cropsTab", k); } catch { /* egal */ }
+      render();
+    });
+    return h("label", {}, input, label);
+  };
+  return h("div", { class: "seg", role: "radiogroup", "aria-label": "Ansicht" },
+    opt("kulturen", "Kulturen"), opt("sorten", `Sorten (${state.varieties.length})`));
+}
 
 export function mountCrops(root) {
   const page = h("div", { class: "page" });
   root.append(page);
 
   function render() {
+    if (tab === "sorten") {
+      const keepTop = page.scrollTop;
+      const inner = h("div", { class: "page-inner" },
+        h("div", { class: "page-head" }, h("h1", {}, "Sorten"), tabs(render)),
+        varietiesView(render));
+      replaceKeepingFocus(page, [inner]);
+      page.scrollTop = keepTop;
+      return;
+    }
     const keep = page.scrollTop;
     const used = new Map();
     for (const p of state.plantings) used.set(p.crop_id, (used.get(p.crop_id) || 0) + 1);
@@ -50,6 +76,7 @@ export function mountCrops(root) {
     const inner = h("div", { class: "page-inner" },
       h("div", { class: "page-head" },
         h("h1", {}, "Kulturen"),
+        tabs(render),
         search,
         h("button", { type: "button", class: "btn btn-primary", onclick: () => openCropEditor(null) }, "Neue Kultur")),
       h("p", { class: "muted", style: { margin: "-14px 0 0", maxWidth: "70ch" } },

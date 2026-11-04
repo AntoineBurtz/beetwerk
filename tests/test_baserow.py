@@ -92,7 +92,8 @@ def test_setup_and_sync(client, fake):
     mixed, plants, traits, obs = _bonitur(client)
     assert client.get("/api/baserow").json()["pending"] == len(obs)
     res = client.post("/api/baserow/sync").json()
-    assert res["result"]["created"] == len(traits) + len(plants) + len(obs)
+    data = client.get("/api/data").json()
+    assert res["result"]["created"] == len(traits) + len(plants) + len(obs) + len(data["crops"]) + len(data["plantings"])
     assert res["result"]["photos"] == 1 and res["pending"] == 0 and res["last_error"] is None
 
     prows = {r["Beetwerk-ID"]: r for r in _table(store, "Bonitur-Pflanzen")["rows"].values()}
@@ -146,12 +147,17 @@ def test_connect_existing_tables(client, fake):
     token = next(iter(store.tokens))
     ids = {k: _table(store, n)["id"] for k, n in
            (("traits", "Bonitur-Merkmale"), ("plants", "Bonitur-Pflanzen"), ("observations", "Boniturwerte"))}
+    before = {n: len(_table(store, n)["rows"]) for n in ("Bonitur-Merkmale", "Bonitur-Pflanzen", "Boniturwerte")}
     body = {"url": url, "token": token, "traits_table_id": ids["traits"], "plants_table_id": ids["plants"],
             "observations_table_id": ids["observations"]}
+    client.delete("/api/baserow")  # Verbindung vergessen und dieselben Tabellen von Hand neu verbinden
     r = client.post("/api/baserow/connect", json=body)
     assert r.status_code == 200, r.text
     assert r.json()["links"]["variety"] == _table(store, "Sorten")["id"]
-    assert client.post("/api/baserow/sync").json()["result"]["created"] == 0  # gleiche Tabellen, nichts doppelt
+    assert r.json()["missing"] == ["Kulturen", "Beetwerk-Sorten", "Sätze"]
+    res = client.post("/api/baserow/sync").json()["result"]
+    assert res["created"] == 0  # vorhandene Zeilen werden über die Beetwerk-ID übernommen
+    assert {n: len(_table(store, n)["rows"]) for n in before} == before
 
     assert client.post("/api/baserow/connect", json={**body, "token": "falsch"}).status_code == 502
     values = _table(store, "Boniturwerte")
@@ -193,3 +199,62 @@ def test_wrong_host_is_explained():
             baserow.login(f"http://127.0.0.1:{srv.server_address[1]}", "a@b.c", "x")
     finally:
         srv.shutdown()
+
+
+
+def test_varieties_crops_and_plantings(client, fake):
+    url, store = fake
+    tokens = len(store.tokens)
+    dbs = client.post("/api/baserow/databases", json={"url": url, **LOGIN}).json()["databases"]
+    sorten = next(t["id"] for t in dbs[0]["tables"] if t["name"] == "Sorten")
+    r = client.post("/api/baserow/setup", json={"url": url, **LOGIN, "database_id": dbs[0]["id"], "variety_table_id": sorten})
+    assert r.status_code == 200, r.text
+    assert r.json()["missing"] == [] and len(store.tokens) == tokens + 1
+    # erneutes Einrichten: Tabellen und Token bleiben, nichts doppelt
+    again = client.post("/api/baserow/setup", json={"url": url, **LOGIN, "database_id": dbs[0]["id"], "variety_table_id": sorten})
+    assert again.status_code == 200 and len(store.tokens) == tokens + 1
+    assert sum(1 for t in store.tables.values() if t["name"] == "Kulturen") == 1
+
+    data = client.get("/api/data").json()
+    tomate = next(c for c in data["crops"] if c["name"] == "Tomate")
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (60, 40), "#c0392b").save(buf, "JPEG")
+    photo = client.post("/api/photos", content=buf.getvalue(), headers={"Content-Type": "image/jpeg"}).json()["name"]
+    v = client.post("/api/varieties", json={"crop_id": tomate["id"], "name": "Ochsenherz", "species": "Solanum lycopersicum",
+                                            "kind": "Fleischtomate", "seed": "samenfest", "photo": photo,
+                                            "photo_credit": "eigenes Foto",
+                                            "links": [{"url": "https://example.org/ochsenherz", "title": "Shop"}]})
+    assert v.status_code == 201, v.text
+    dup = client.post("/api/varieties", json={"crop_id": tomate["id"], "name": "ochsenherz"})
+    assert dup.status_code == 409
+    collected = client.post("/api/varieties/collect").json()["created"]
+    assert "Green Zebra" in {x["name"] for x in collected} and "Ochsenherz" not in {x["name"] for x in collected}
+    assert client.delete(f"/api/crops/{tomate['id']}").status_code == 409
+
+    res = client.post("/api/baserow/sync").json()
+    assert res["last_error"] is None, res
+    crops_t, sorts_t, sets_t = (_table(store, n) for n in ("Kulturen", "Beetwerk-Sorten", "Sätze"))
+    crop_rows = {r["Beetwerk-ID"]: r for r in crops_t["rows"].values()}
+    assert len(crop_rows) == len(data["crops"]) and crop_rows[tomate["id"]]["Bonitur-Merkmale"] == "Tomate"
+    sort_rows = {r["Sorte"]: r for r in sorts_t["rows"].values() if r["Kultur"] == [crop_rows[tomate["id"]]["id"]]}
+    oh = sort_rows["Ochsenherz"]
+    assert oh["Typ"] == "Fleischtomate" and oh["Foto"][0]["name"] in store.files and "example.org" in oh["Quellen"]
+    mixed = next(p for p in data["plantings"] if p["varieties"] and p["sow_date"] == "2026-03-10")
+    set_row = next(r for r in sets_t["rows"].values() if r["Beetwerk-ID"] == mixed["id"])
+    assert set_row["Pflanzen"] == 15 and set_row["Aussaat"] == "2026-03-10" and set_row["Kultur"] == [crop_rows[tomate["id"]]["id"]]
+    assert oh["id"] in set_row["Sorten"] and len(set_row["Sorten"]) == 5
+    plant_rows = [r for r in _table(store, "Bonitur-Pflanzen")["rows"].values() if r["Sorte"] == "Ochsenherz"]
+    assert plant_rows and all(r["Beetwerk-Sorte"] == [oh["id"]] for r in plant_rows)
+
+    # Löschen einer Sorte löscht die Zeile in Baserow
+    gz = next(x for x in collected if x["name"] == "Green Zebra")
+    assert client.delete(f"/api/varieties/{gz['id']}").status_code == 204
+    res = client.post("/api/baserow/sync").json()["result"]
+    assert res["deleted"] == 1 and "Green Zebra" not in {r["Sorte"] for r in sorts_t["rows"].values()}
+
+    # Sicherung enthält die Sortenliste
+    exported = client.get("/api/export").json()
+    assert any(x["name"] == "Ochsenherz" for x in exported["varieties"])
+    assert client.post("/api/import", json=exported).status_code == 200
+    assert any(x["name"] == "Ochsenherz" for x in client.get("/api/varieties").json())

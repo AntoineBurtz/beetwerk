@@ -45,7 +45,38 @@ DATE = {"type": "date", "date_format": "EU", "date_include_time": False}
 BOOL = {"type": "boolean"}
 FILE = {"type": "file"}
 
+DECIMAL2 = {"type": "number", "number_decimal_places": 2, "number_negative": False}
+
 TABLES = {
+    "crops": {
+        "name": "Kulturen",
+        "primary": "Kultur",
+        "fields": [
+            ("Familie", TEXT), ("Anbauart", TEXT), ("Anzucht (Tage)", INT), ("Bis Ernte (Tage)", INT),
+            ("Erntedauer (Tage)", INT), ("Reihenabstand (cm)", INT), ("Pflanzabstand (cm)", INT),
+            ("Bonitur-Merkmale", TEXT), ("Farbe", TEXT), ("Notizen", LONG), ("Beetwerk-ID", INT),
+        ],
+    },
+    "varieties": {
+        "name": "Beetwerk-Sorten",
+        "primary": "Sorte",
+        "fields": [
+            ("Kultur", {"type": "link_row", "to": "crops"}), ("Botanische Art", TEXT), ("Typ", TEXT),
+            ("Saatgut", TEXT), ("Wuchs", TEXT), ("Fruchtfarbe", TEXT), ("Reife", TEXT), ("Bezugsquelle", TEXT),
+            ("Gekauft", TEXT), ("Beschreibung", LONG), ("Foto", FILE), ("Bildquelle", TEXT), ("Quellen", LONG),
+            ("Notizen", LONG), ("Beetwerk-ID", INT),
+        ],
+    },
+    "plantings": {
+        "name": "Sätze",
+        "primary": "Satz",
+        "fields": [
+            ("Kultur", {"type": "link_row", "to": "crops"}), ("Sorten", {"type": "link_row", "to": "varieties"}),
+            ("Sorten (Text)", TEXT), ("Beet", TEXT), ("Anbau", TEXT), ("Jahr", INT), ("Aussaat", DATE),
+            ("Pflanzung", DATE), ("Ernte ab", DATE), ("Ernte bis", DATE), ("Pflanzen", INT), ("Fläche (m²)", DECIMAL2),
+            ("Notizen", LONG), ("Beetwerk-ID", INT),
+        ],
+    },
     "traits": {
         "name": "Bonitur-Merkmale",
         "primary": "Merkmal",
@@ -74,7 +105,11 @@ TABLES = {
         ],
     },
 }
-ORDER = ("traits", "plants", "observations")
+ORDER = ("crops", "varieties", "plantings", "traits", "plants", "observations")
+BASE = ("traits", "plants", "observations")         # nötig für die Bonitur
+EXTRA = ("crops", "varieties", "plantings")         # Kulturen, Sorten und Sätze, seit Version 2 dabei
+# Pflanzen zusätzlich mit der Beetwerk-Sortenliste verknüpfen, wenn es die Tabelle gibt
+SORT_FIELD = ("Beetwerk-Sorte", {"type": "link_row", "to": "varieties"})
 # Verknüpfung mit vorhandenen Tabellen (Sorten, Etiketten); Feldname → (Tabellen, Schlüssel der Einstellung)
 VARIETY_FIELD = "Sorte verknüpft"
 LABEL_FIELD = "Etikett verknüpft"
@@ -252,7 +287,8 @@ def status() -> dict:
         "connected": connected,
         "url": s.get("baserow_url") or "",
         "database": cfg.get("database", ""),
-        "tables": {k: cfg.get("tables", {}).get(k) for k in ORDER} if connected else {},
+        "tables": {k: cfg.get("tables", {}).get(k) for k in ORDER if cfg.get("tables", {}).get(k)} if connected else {},
+        "missing": [TABLES[k]["name"] for k in EXTRA if not cfg.get("tables", {}).get(k)] if connected else [],
         "links": {k: v for k, v in (cfg.get("links") or {}).items()} if connected else {},
         "auto": DELAY > 0,
         "pending": pending if connected else 0,
@@ -282,19 +318,20 @@ def spec() -> list[dict]:
                 label += f", {f['number_decimal_places']} Nachkommastellen"
                 if f.get("number_negative"):
                     label += ", negativ erlaubt"
-            out_name = name
-            fields.append({"name": out_name, "type": label})
+            fields.append({"name": name, "type": label})
+        if kind == "plants":
+            fields.append({"name": SORT_FIELD[0], "type": f"Verknüpfung zu „{TABLES['varieties']['name']}“ (wenn vorhanden)"})
         out.append({"kind": kind, "name": t["name"], "fields": fields})
     return out
 
 
-def _reset_local(conn) -> None:
-    """Neue Tabellen: alle Zuordnungen zu Baserow-Zeilen vergessen."""
-    for table in ("traits", "plants"):
-        conn.execute(f"UPDATE {table} SET baserow_id = NULL, bw_hash = ''")
-    conn.execute("UPDATE observations SET baserow_id = NULL, bw_hash = '', baserow_file = '', baserow_photo = '', "
-                 "synced_at = NULL")
-    conn.execute("DELETE FROM baserow_deleted")
+def _reset_local(conn, kinds=ORDER) -> None:
+    """Neue Tabellen: Zuordnungen zu Baserow-Zeilen vergessen (nur für die genannten Tabellen)."""
+    for kind in kinds:
+        extra = ", baserow_file = '', baserow_photo = ''" if kind in ("observations", "varieties") else ""
+        extra += ", synced_at = NULL" if kind == "observations" else ""
+        conn.execute(f"UPDATE {kind} SET baserow_id = NULL, bw_hash = ''{extra}")
+        conn.execute("DELETE FROM baserow_deleted WHERE kind = ?", (kind,))
 
 
 def disconnect() -> None:
@@ -369,7 +406,6 @@ def setup(url: str, email: str, password: str, database_id: int,
             raise BaserowError("Sorten- und Etikettentabelle müssen in derselben Datenbank liegen")
 
     tables: dict[str, int] = {}
-    created_any = False
     for kind in ORDER:
         spec = TABLES[kind]
         if spec["name"] in existing:
@@ -378,11 +414,12 @@ def setup(url: str, email: str, password: str, database_id: int,
             t = client.call("POST", f"/api/database/tables/database/{database_id}/",
                             {"name": spec["name"], "data": [[spec["primary"]]], "first_row_header": True})
             tables[kind] = t["id"]
-            created_any = True
     for kind in ORDER:
         spec = TABLES[kind]
         have = {f["name"]: f for f in client.fields(tables[kind])}
         wanted = list(spec["fields"])
+        if kind == "plants":
+            wanted.append(SORT_FIELD)
         if kind in ("plants", "observations") and variety_table:
             wanted.append((VARIETY_FIELD, {"type": "link_row", "to": "variety"}))
         if kind == "plants" and label_table:
@@ -395,22 +432,40 @@ def setup(url: str, email: str, password: str, database_id: int,
                 body["has_related_field"] = False  # vorhandene Tabellen nicht verändern
             client.call("POST", f"/api/database/fields/table/{tables[kind]}/", body)
 
-    token = client.call("POST", "/api/database/tokens/", {"name": "Beetwerk", "workspace": ws.get("id"),
-                                                          "group": ws.get("id")})
-    key = (token or {}).get("key")
+    key = _reusable_token(client.url, tables)
+    if not key:
+        token = client.call("POST", "/api/database/tokens/", {"name": "Beetwerk", "workspace": ws.get("id"),
+                                                              "group": ws.get("id")})
+        key = (token or {}).get("key")
     if not key:
         raise BaserowError("Baserow hat keinen Datenbank-Token angelegt")
-    cfg = {"database": app.get("name", ""), "tables": tables,
+    cfg = {"database": app.get("name", ""), "tables": tables, "sort_link": True,
            "links": {"variety": variety_table, "label": label_table}}
-    _store(client.url, key, cfg, reset=created_any)
+    _store(client.url, key, cfg)
     return status()
+
+
+def _reusable_token(url: str, tables: dict) -> Optional[str]:
+    """Beim erneuten Einrichten den vorhandenen Token behalten, wenn er alle Tabellen erreicht."""
+    with db.session() as conn:
+        s = _get_settings(conn)
+    if s.get("baserow_url") != url or not s.get("baserow_token"):
+        return None
+    try:
+        reach = Client(url, token=s["baserow_token"]).call("GET", "/api/database/tables/all-tables/") or []
+    except BaserowError:
+        return None
+    ids = {t.get("id") for t in reach}
+    return s["baserow_token"] if set(tables.values()) <= ids else None
 
 
 def check_tables(client: Client, tables: dict) -> dict:
     """Prüft vorhandene Tabellen auf alle Felder; liefert gefundene Verknüpfungen zurück."""
-    links: dict[str, Optional[int]] = {"variety": None, "label": None}
+    links: dict[str, Optional[int]] = {"variety": None, "label": None, "sort_link": False}
     problems = []
     for kind in ORDER:
+        if kind not in tables:
+            continue
         spec = TABLES[kind]
         fields = client.fields(tables[kind])
         by_name = {f["name"]: f for f in fields}
@@ -433,6 +488,10 @@ def check_tables(client: Client, tables: dict) -> dict:
             f = by_name.get(fname)
             if f and f["type"] == "link_row":
                 links[key] = f.get("link_row_table_id", f.get("link_row_table"))
+        f = by_name.get(SORT_FIELD[0])
+        if kind == "plants" and f and f["type"] == "link_row" and \
+                f.get("link_row_table_id", f.get("link_row_table")) == tables.get("varieties"):
+            links["sort_link"] = True
     if problems:
         raise BaserowError("Es fehlen Felder oder sie haben den falschen Typ – " + "; ".join(problems))
     return links
@@ -443,22 +502,31 @@ def connect(url: str, token: str, tables: dict) -> dict:
     if not token:
         raise BaserowError("Bitte den Datenbank-Token angeben")
     client = Client(url, token=token)
-    tables = {k: int(tables[k]) for k in ORDER}
+    tables = {k: int(v) for k, v in tables.items() if v}
+    if any(k not in tables for k in BASE):
+        raise BaserowError("Bitte die IDs der drei Bonitur-Tabellen angeben")
+    if "plantings" in tables and not {"crops", "varieties"} <= set(tables):
+        raise BaserowError("Für „Sätze“ braucht es auch die Tabellen „Kulturen“ und „Beetwerk-Sorten“")
+    if "varieties" in tables and "crops" not in tables:
+        raise BaserowError("Für „Beetwerk-Sorten“ braucht es auch die Tabelle „Kulturen“")
     links = check_tables(client, tables)
-    for kind in ORDER:  # darf der Token lesen?
+    for kind in tables:  # darf der Token lesen?
         client.call("GET", f"/api/database/rows/table/{tables[kind]}/", params={"size": 1})
-    with db.session() as conn:
-        old = _loads(_get_settings(conn).get("baserow_config"), {}) or {}
-    _store(client.url, token, {"database": "", "tables": tables, "links": links},
-           reset=old.get("tables") != tables)
+    sort_link = links.pop("sort_link")
+    _store(client.url, token, {"database": "", "tables": tables, "links": links, "sort_link": sort_link})
     return status()
 
 
-def _store(url: str, token: str, cfg: dict, reset: bool) -> None:
+def _store(url: str, token: str, cfg: dict) -> None:
     with db.session() as conn:
-        old = _loads(_get_settings(conn).get("baserow_config"), {}) or {}
-        if reset or old.get("tables") != cfg.get("tables"):
-            _reset_local(conn)
+        before = _loads(_get_settings(conn).get("baserow_config"), {}) or {}
+        old = before.get("tables") or {}
+        changed = [k for k in ORDER if old.get(k) != cfg["tables"].get(k)]
+        if changed:
+            _reset_local(conn, changed)
+        # Beim ersten Abgleich vorhandene Zeilen über die Beetwerk-ID übernehmen statt doppelt anzulegen
+        pending = set(before.get("adopt") or []) | set(changed)
+        cfg["adopt"] = [k for k in ORDER if k in pending and cfg["tables"].get(k)]
         _set(conn, "baserow_url", url)
         _set(conn, "baserow_token", token)
         _set(conn, "baserow_config", json.dumps(cfg))
@@ -497,13 +565,13 @@ def trait_payload(t: dict) -> dict:
 
 def _planting_info(conn) -> dict[int, dict]:
     out = {}
-    for p in db.rows(conn, """SELECT p.id, p.variety, p.varieties, p.sow_date, p.plant_date, c.name AS crop,
+    for p in db.rows(conn, """SELECT p.id, p.crop_id, p.variety, p.varieties, p.sow_date, p.plant_date, c.name AS crop,
                                      b.name AS bed FROM plantings p JOIN crops c ON c.id = p.crop_id
                               LEFT JOIN beds b ON b.id = p.bed_id"""):
         start = p["plant_date"] or p["sow_date"]
         refs = {v.get("name"): v.get("ref") for v in (bonitur._loads(p["varieties"], []) or []) if v.get("ref")}
         out[p["id"]] = {
-            "crop": p["crop"], "bed": p["bed"] or "ohne Beet", "year": int(start[:4]), "refs": refs,
+            "crop": p["crop"], "crop_id": p["crop_id"], "bed": p["bed"] or "ohne Beet", "year": int(start[:4]), "refs": refs,
             "satz": f"{p['crop']}, {p['bed'] or 'ohne Beet'}, {start[:4]} (Satz {p['id']})",
         }
     return out
@@ -544,7 +612,7 @@ class Lookup:
         return []
 
 
-def plant_payload(pl: dict, info: dict, cfg: dict, lookups: dict) -> dict:
+def plant_payload(pl: dict, info: dict, cfg: dict, lookups: dict, sort_bid: Optional[int] = None) -> dict:
     out = {
         "Pflanze": plant_title(pl, info), "Etikett": pl["label"], "Jahr": info["year"], "Kultur": info["crop"],
         "Sorte": pl["variety"], "Beet": info["bed"], "Satz": info["satz"], "Nr": pl["num"], "Reihe": pl["row"],
@@ -556,7 +624,70 @@ def plant_payload(pl: dict, info: dict, cfg: dict, lookups: dict) -> dict:
         out[VARIETY_FIELD] = lookups["variety"].find(pl["variety_ref"], info["refs"].get(pl["variety"]), pl["variety"])
     if links.get("label"):
         out[LABEL_FIELD] = lookups["label"].find(pl["label"])
+    if cfg.get("sort_link") and cfg["tables"].get("varieties"):
+        out[SORT_FIELD[0]] = [sort_bid] if sort_bid else []
     return out
+
+
+METHOD_TEXT = {"direct": "Direktsaat", "transplant": "Anzucht und Pflanzung"}
+
+
+def crop_payload(c: dict) -> dict:
+    return {
+        "Kultur": c["name"], "Familie": c["family"], "Anbauart": METHOD_TEXT.get(c["method"], c["method"]),
+        "Anzucht (Tage)": c["nursery_days"], "Bis Ernte (Tage)": c["field_days"],
+        "Erntedauer (Tage)": c["harvest_days"], "Reihenabstand (cm)": c["row_spacing"],
+        "Pflanzabstand (cm)": c["plant_spacing"],
+        "Bonitur-Merkmale": GROUP_TEXT.get(c.get("trait_group") or "all", "") if c.get("trait_group") else "allgemein",
+        "Farbe": c["color"], "Notizen": c["notes"], "Beetwerk-ID": c["id"],
+    }
+
+
+def _links_text(raw) -> str:
+    links = bonitur._loads(raw, []) or []
+    return "\n".join(f"{x.get('title') or x.get('url')} – {x.get('url')}" if x.get("title") else x.get("url", "")
+                     for x in links if isinstance(x, dict))
+
+
+def variety_payload(v: dict, crop_bid: Optional[int]) -> dict:
+    return {
+        "Sorte": v["name"], "Kultur": [crop_bid] if crop_bid else [], "Botanische Art": v["species"], "Typ": v["kind"],
+        "Saatgut": v["seed"], "Wuchs": v["growth"], "Fruchtfarbe": v["color"], "Reife": v["maturity"],
+        "Bezugsquelle": v["supplier"], "Gekauft": v["bought"], "Beschreibung": v["description"],
+        "Bildquelle": v["photo_credit"], "Quellen": _links_text(v["links"]), "Notizen": v["notes"],
+        "Beetwerk-ID": v["id"],
+    }
+
+
+def plant_count(p: dict, crop: dict, bed: Optional[dict]) -> int:
+    """Wie util.js plantLayout: Reihen entlang der längeren Seite, Plätze je Reihe."""
+    if p.get("varieties"):
+        mixed = bonitur._loads(p["varieties"], []) or []
+        if mixed:
+            return sum(int(v.get("count") or 0) for v in mixed)
+    row_sp = p["row_spacing"] or crop["row_spacing"] or 30
+    plant_sp = p["plant_spacing"] or crop["plant_spacing"] or 30
+    span = p["span"] if p["span"] is not None else (max(0.05, bed["width"] - (p["offset"] or 0)) if bed else 1)
+    long_m, short_m = max(p["len"], span), min(p["len"], span)
+    rows = p["rows"] or max(1, int((short_m * 100 + 0.5) // row_sp))
+    per_row = max(1, int((long_m * 100 + 0.5) // plant_sp))
+    return rows * per_row
+
+
+def planting_payload(p: dict, crop: dict, bed: Optional[dict], crop_bid: Optional[int], variety_bids: list[int]) -> dict:
+    mixed = bonitur._loads(p["varieties"], []) or []
+    names = ", ".join(f"{v.get('name')} ({v.get('count')})" for v in mixed) if mixed else p["variety"]
+    start = p["plant_date"] or p["sow_date"]
+    span = p["span"] if p["span"] is not None else (max(0.05, bed["width"] - (p["offset"] or 0)) if bed else 1)
+    title = f"{crop['name']}{' ' + (p['variety'] if not mixed else f'{len(mixed)} Sorten') if (p['variety'] or mixed) else ''}"
+    return {
+        "Satz": f"{title}, {bed['name'] if bed else 'ohne Beet'}, {start[:4]}", "Kultur": [crop_bid] if crop_bid else [],
+        "Sorten": variety_bids, "Sorten (Text)": names, "Beet": bed["name"] if bed else "",
+        "Anbau": METHOD_TEXT.get(p["method"], p["method"]), "Jahr": int(start[:4]), "Aussaat": p["sow_date"],
+        "Pflanzung": p["plant_date"], "Ernte ab": p["harvest_start"], "Ernte bis": p["harvest_end"],
+        "Pflanzen": plant_count(p, crop, bed), "Fläche (m²)": round(p["len"] * span, 2), "Notizen": p["notes"],
+        "Beetwerk-ID": p["id"],
+    }
 
 
 def _num_text(n: float) -> str:
@@ -668,10 +799,39 @@ def sync() -> dict:
         _lock.release()
 
 
+def _adopt(client: Client, cfg: dict) -> None:
+    """Zeilen, die schon in Baserow stehen (gleiche Beetwerk-ID), wieder zuordnen."""
+    for kind in cfg.get("adopt") or []:
+        table_id = cfg["tables"].get(kind)
+        if not table_id:
+            continue
+        found = {}
+        for row in client.rows(table_id):
+            bid = row.get("Beetwerk-ID")
+            try:
+                found.setdefault(int(float(bid)), row["id"])
+            except (TypeError, ValueError):
+                continue
+        if found:
+            with db.session() as conn:
+                conn.executemany(f"UPDATE {kind} SET baserow_id = ?, bw_hash = '' WHERE id = ? AND baserow_id IS NULL",
+                                 [(rid, lid) for lid, rid in found.items()])
+    if cfg.get("adopt"):
+        with db.session() as conn:
+            stored = _loads(_get_settings(conn).get("baserow_config"), {}) or {}
+            stored.pop("adopt", None)
+            _set(conn, "baserow_config", json.dumps(stored))
+
+
 def _run(client: Client, cfg: dict, result: dict) -> None:
+    _adopt(client, cfg)
     tables = cfg["tables"]
     links = cfg.get("links") or {}
     with db.session() as conn:
+        crops = db.rows(conn, "SELECT * FROM crops ORDER BY name")
+        varieties = db.rows(conn, "SELECT * FROM varieties ORDER BY name")
+        plantings = db.rows(conn, "SELECT * FROM plantings ORDER BY sow_date, id")
+        beds = {b["id"]: b for b in db.rows(conn, "SELECT * FROM beds")}
         traits = db.rows(conn, "SELECT * FROM traits ORDER BY sort, id")
         plants = db.rows(conn, "SELECT * FROM plants ORDER BY planting_id, num")
         obs = db.rows(conn, "SELECT * FROM observations ORDER BY date, id")
@@ -679,6 +839,47 @@ def _run(client: Client, cfg: dict, result: dict) -> None:
         deleted = db.rows(conn, "SELECT rowid AS rid, kind, row_id FROM baserow_deleted")
     lookups = {"variety": Lookup(client, links.get("variety") if (plants or obs) else None),
                "label": Lookup(client, links.get("label") if plants else None)}
+
+    # 0. Kulturen, Sortenliste und Sätze (wenn die Tabellen eingerichtet sind)
+    crop_by_id = {c["id"]: c for c in crops}
+    if tables.get("crops"):
+        items = []
+        for c in crops:
+            payload = crop_payload(c)
+            h = _hash(payload)
+            if not c["baserow_id"] or c["bw_hash"] != h:
+                items.append((c, payload, h))
+        _write(client, tables["crops"], "crops", items, result)
+    crop_bid = {c["id"]: c["baserow_id"] for c in crops}
+    variety_key = {(v["crop_id"], v["name"].strip().lower()): v for v in varieties}
+    if tables.get("varieties"):
+        items = []
+        for v in varieties:
+            payload = variety_payload(v, crop_bid.get(v["crop_id"]))
+            h = _hash(payload, extra=v["photo"])
+            if v["baserow_id"] and v["bw_hash"] == h and v["photo"] == v["baserow_photo"]:
+                continue
+            _upload_photo(client, "varieties", v, f"sorte-{v['id']}.jpg", result)
+            payload["Foto"] = [{"name": v["baserow_file"]}] if v["photo"] and v["baserow_file"] else []
+            items.append((v, payload, h))
+        _write(client, tables["varieties"], "varieties", items, result, extra_cols=_photo_cols)
+    if tables.get("plantings"):
+        items = []
+        for pt in plantings:
+            crop = crop_by_id.get(pt["crop_id"])
+            if not crop:
+                continue
+            mixed = bonitur._loads(pt["varieties"], []) or []
+            names = [x.get("name", "") for x in mixed] if mixed else ([pt["variety"]] if pt["variety"] else [])
+            vbids = [variety_key[(pt["crop_id"], n.strip().lower())]["baserow_id"] for n in names
+                     if (pt["crop_id"], n.strip().lower()) in variety_key
+                     and variety_key[(pt["crop_id"], n.strip().lower())]["baserow_id"]]
+            payload = planting_payload(pt, crop, beds.get(pt["bed_id"]), crop_bid.get(pt["crop_id"]),
+                                       list(dict.fromkeys(vbids)))
+            h = _hash(payload)
+            if not pt["baserow_id"] or pt["bw_hash"] != h:
+                items.append((pt, payload, h))
+        _write(client, tables["plantings"], "plantings", items, result)
 
     # 1. Merkmale
     items = []
@@ -695,7 +896,9 @@ def _run(client: Client, cfg: dict, result: dict) -> None:
     for pl in plants:
         if pl["planting_id"] not in info:
             continue
-        payload = plant_payload(pl, info[pl["planting_id"]], cfg, lookups)
+        pinfo = info[pl["planting_id"]]
+        sort = variety_key.get((pinfo["crop_id"], (pl["variety"] or "").strip().lower()))
+        payload = plant_payload(pl, pinfo, cfg, lookups, sort["baserow_id"] if sort else None)
         h = _hash(payload)
         if not pl["baserow_id"] or pl["bw_hash"] != h:
             items.append((pl, payload, h))
@@ -717,25 +920,18 @@ def _run(client: Client, cfg: dict, result: dict) -> None:
         h = _hash(payload, extra=o["photo"])
         if o["baserow_id"] and o["bw_hash"] == h and o["photo"] == o["baserow_photo"]:
             continue
-        if o["photo"] and o["photo"] != o["baserow_photo"]:
-            path = bonitur.PHOTO_DIR / f"{o['photo']}.jpg"
-            if path.exists():
-                up = client.upload(f"bonitur-{o['date']}-{o['id']}.jpg", path.read_bytes())
-                o["baserow_file"], o["baserow_photo"] = up["name"], o["photo"]
-                result["photos"] += 1
-                with db.session() as conn:
-                    conn.execute("UPDATE observations SET baserow_file = ?, baserow_photo = ? WHERE id = ?",
-                                 (o["baserow_file"], o["baserow_photo"], o["id"]))
-        if not o["photo"]:
-            o["baserow_file"] = o["baserow_photo"] = ""
+        _upload_photo(client, "observations", o, f"bonitur-{o['date']}-{o['id']}.jpg", result)
         payload["Foto"] = [{"name": o["baserow_file"]}] if o["photo"] and o["baserow_file"] else []
         items.append((o, payload, h))
-    _write(client, tables["observations"], "observations", items, result,
-           extra_cols=lambda r: {"baserow_file": r.get("baserow_file", ""), "baserow_photo": r.get("baserow_photo", "")})
+    _write(client, tables["observations"], "observations", items, result, extra_cols=_photo_cols)
 
-    # 4. In Beetwerk Gelöschtes auch in Baserow löschen
-    for kind in ORDER:
+    # 4. In Beetwerk Gelöschtes auch in Baserow löschen (Werte zuerst, Kulturen zuletzt)
+    for kind in reversed(ORDER):
         rows = [d for d in deleted if d["kind"] == kind]
+        if rows and not tables.get(kind):
+            with db.session() as conn:
+                conn.execute("DELETE FROM baserow_deleted WHERE kind = ?", (kind,))
+            continue
         for i in range(0, len(rows), BATCH):
             chunk = rows[i:i + BATCH]
             ids = [d["row_id"] for d in chunk]
@@ -748,6 +944,28 @@ def _run(client: Client, cfg: dict, result: dict) -> None:
             with db.session() as conn:
                 conn.executemany("DELETE FROM baserow_deleted WHERE rowid = ?", [(d["rid"],) for d in chunk])
             result["deleted"] += len(chunk)
+
+
+def _photo_cols(rec: dict) -> dict:
+    return {"baserow_file": rec.get("baserow_file", ""), "baserow_photo": rec.get("baserow_photo", "")}
+
+
+def _upload_photo(client: Client, table: str, rec: dict, filename: str, result: dict) -> None:
+    """Eigenes Foto einmal nach Baserow hochladen; merkt sich, welches dort liegt."""
+    if not rec["photo"]:
+        rec["baserow_file"] = rec["baserow_photo"] = ""
+        return
+    if rec["photo"] == rec["baserow_photo"]:
+        return
+    path = bonitur.PHOTO_DIR / f"{rec['photo']}.jpg"
+    if not path.exists():
+        return
+    up = client.upload(filename, path.read_bytes())
+    rec["baserow_file"], rec["baserow_photo"] = up["name"], rec["photo"]
+    result["photos"] += 1
+    with db.session() as conn:
+        conn.execute(f"UPDATE {table} SET baserow_file = ?, baserow_photo = ? WHERE id = ?",
+                     (rec["baserow_file"], rec["baserow_photo"], rec["id"]))
 
 
 # ---------------------------------------------------------------- Automatisch
@@ -820,6 +1038,9 @@ class ConnectIn(BaseModel):
     traits_table_id: int = Field(ge=1)
     plants_table_id: int = Field(ge=1)
     observations_table_id: int = Field(ge=1)
+    crops_table_id: Optional[int] = Field(None, ge=1)
+    varieties_table_id: Optional[int] = Field(None, ge=1)
+    plantings_table_id: Optional[int] = Field(None, ge=1)
 
 
 @router.get("/api/baserow")
@@ -848,8 +1069,10 @@ def do_setup(body: SetupIn):
 @router.post("/api/baserow/connect")
 def do_connect(body: ConnectIn):
     try:
-        out = connect(body.url, body.token.strip(), {"traits": body.traits_table_id, "plants": body.plants_table_id,
-                                                     "observations": body.observations_table_id})
+        out = connect(body.url, body.token.strip(), {
+            "traits": body.traits_table_id, "plants": body.plants_table_id,
+            "observations": body.observations_table_id, "crops": body.crops_table_id,
+            "varieties": body.varieties_table_id, "plantings": body.plantings_table_id})
     except BaserowError as exc:
         _fail(exc)
     schedule(1)

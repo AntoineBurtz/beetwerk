@@ -146,6 +146,28 @@ CREATE TABLE IF NOT EXISTS observations (
     synced_at   TEXT                              -- für den späteren Abgleich mit Baserow
 );
 
+-- Sortenliste: Saatgut und Sorten mit Einordnung, Foto und Quellen
+CREATE TABLE IF NOT EXISTS varieties (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    crop_id      INTEGER REFERENCES crops(id),
+    name         TEXT    NOT NULL,
+    species      TEXT    NOT NULL DEFAULT '',   -- botanische Art
+    kind         TEXT    NOT NULL DEFAULT '',   -- Typ, z. B. Fleischtomate
+    seed         TEXT    NOT NULL DEFAULT '',   -- samenfest, F1, …
+    growth       TEXT    NOT NULL DEFAULT '',   -- Wuchs
+    color        TEXT    NOT NULL DEFAULT '',   -- Fruchtfarbe
+    maturity     TEXT    NOT NULL DEFAULT '',   -- Reife
+    supplier     TEXT    NOT NULL DEFAULT '',   -- Bezugsquelle
+    bought       TEXT    NOT NULL DEFAULT '',   -- gekauft (Jahr)
+    description  TEXT    NOT NULL DEFAULT '',
+    photo        TEXT    NOT NULL DEFAULT '',
+    photo_credit TEXT    NOT NULL DEFAULT '',   -- Bildquelle und Lizenz
+    links        TEXT    NOT NULL DEFAULT '',   -- JSON: [{url, title}]
+    notes        TEXT    NOT NULL DEFAULT '',
+    created_at   TEXT    NOT NULL,
+    updated_at   TEXT    NOT NULL
+);
+
 -- In Beetwerk gelöschte Zeilen, die beim nächsten Abgleich auch in Baserow verschwinden
 CREATE TABLE IF NOT EXISTS baserow_deleted (
     kind   TEXT    NOT NULL,                      -- traits | plants | observations
@@ -155,6 +177,7 @@ CREATE TABLE IF NOT EXISTS baserow_deleted (
 CREATE INDEX IF NOT EXISTS plantings_bed  ON plantings(bed_id);
 CREATE INDEX IF NOT EXISTS plantings_crop ON plantings(crop_id);
 CREATE INDEX IF NOT EXISTS plants_planting ON plants(planting_id);
+CREATE INDEX IF NOT EXISTS varieties_crop ON varieties(crop_id);
 CREATE UNIQUE INDEX IF NOT EXISTS plants_label ON plants(label) WHERE label <> '';
 CREATE INDEX IF NOT EXISTS obs_planting ON observations(planting_id);
 CREATE INDEX IF NOT EXISTS obs_plant ON observations(plant_id);
@@ -236,8 +259,18 @@ MIGRATIONS = {
     ],
     "crops": [
         ("trait_group", "TEXT NOT NULL DEFAULT ''"),   # Bonitur-Merkmale: '' | tomato | pepper
+        ("baserow_id", "INTEGER"),
+        ("bw_hash", "TEXT NOT NULL DEFAULT ''"),
+    ],
+    "varieties": [
+        ("baserow_id", "INTEGER"),
+        ("bw_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("baserow_file", "TEXT NOT NULL DEFAULT ''"),
+        ("baserow_photo", "TEXT NOT NULL DEFAULT ''"),
     ],
     "plantings": [
+        ("baserow_id", "INTEGER"),
+        ("bw_hash", "TEXT NOT NULL DEFAULT ''"),
         ("varieties", "TEXT NOT NULL DEFAULT ''"),     # Mischsatz: JSON-Liste [{name, count, ref?}]
         ("fill", "TEXT NOT NULL DEFAULT 'snake'"),     # Pflanzschema: snake | columns
         ("fill_start", "TEXT NOT NULL DEFAULT 'tl'"),  # Startecke: tl | tr | bl | br

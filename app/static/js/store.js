@@ -41,6 +41,7 @@ export const state = {
   beds: [],
   crops: [],
   plantings: [],
+  varieties: [], // Sortenliste
   day: initialDay(),
   sel: null, // { type: "bed" | "planting", id }
   // Modus der Karte: Kultur setzen, Satz ohne Beet zuweisen oder neue Fläche aufziehen
@@ -70,9 +71,10 @@ export const find = {
   bed: (id) => state.beds.find((b) => b.id === id),
   crop: (id) => state.crops.find((c) => c.id === id),
   planting: (id) => state.plantings.find((p) => p.id === id),
+  variety: (id) => state.varieties.find((v) => v.id === id),
 };
 
-const LIST = { beds: "beds", crops: "crops", plantings: "plantings" };
+const LIST = { beds: "beds", crops: "crops", plantings: "plantings", varieties: "varieties" };
 
 export async function load() {
   const data = await api.get("/api/data");
@@ -109,6 +111,7 @@ export async function create(kind, data, { undoLabel } = {}) {
     const item = await api.post(`/api/${kind}`, data);
     state[LIST[kind]].push(item);
     if (kind === "crops") state.crops.sort((a, b) => a.name.localeCompare(b.name, "de"));
+    if (kind === "varieties") state.varieties.sort((a, b) => a.name.localeCompare(b.name, "de"));
     emit("data");
     if (undoLabel) pushUndo({ type: "create", kind, id: item.id, label: undoLabel });
     return item;

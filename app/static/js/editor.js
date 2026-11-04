@@ -9,6 +9,7 @@ import { mixEditor } from "./mix.js";
 import { SOILS, soilOf, FROST_OPTIONS, frostSummary } from "./weather.js";
 import { openGeoSetup } from "./geosetup.js";
 import { baserowSection } from "./baserowsetup.js";
+import { researchSection } from "./researchsetup.js";
 
 export function shell(title, { onSubmit, extraHead } = {}) {
   const dlg = h("dialog");
@@ -163,7 +164,7 @@ export function openPlantingEditor(planting, defaults = {}) {
     plantedLabel.hidden = !isTp;
     rowSp.placeholder = c ? `${c.row_spacing} (Kultur)` : "";
     plantSp.placeholder = c ? `${c.plant_spacing} (Kultur)` : "";
-    const known = new Set();
+    const known = new Set(state.varieties.filter((v) => v.crop_id === c?.id).map((v) => v.name));
     for (const q of state.plantings) {
       if (q.crop_id !== c?.id) continue;
       if (q.variety) known.add(q.variety);
@@ -687,6 +688,7 @@ export function openSettings() {
     field("Anbaupause für die Fruchtfolge (Jahre)", years,
       "Gleiche Pflanzenfamilie an gleicher Stelle innerhalb dieser Zeit wird markiert. 0 schaltet die Prüfung ab."),
     baserowSection(() => ui.dlg.close()),
+    researchSection(),
     h("fieldset", {},
       h("legend", {}, "Sicherung"),
       h("p", { class: "muted small", style: { margin: 0 } },
