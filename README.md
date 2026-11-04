@@ -102,7 +102,27 @@ Unter **Merkmale** lassen sich Merkmale ausschalten, eigene anlegen und Vorlagen
 
 Die BBCH-Zeichnungen liegen im Original unter `assets/bbch/<kultur>/` (Dateiname mit `BBCH<code>`, z. B. `SoLy-BBCH61.png`). `python tools/bbch_images.py` erzeugt daraus kleine WebP-Bilder für die App. Für Paprika und Chili gelten die Tomatenbilder, bis ein Ordner `assets/bbch/paprika/` dazukommt.
 
-Jede Pflanze, jedes Merkmal und jeder Wert hat eine feste Nummer, Werte zusätzlich Zeitstempel für Änderungen (`updated_at`, `synced_at`). Darauf baut der spätere Abgleich mit Baserow auf.
+### Abgleich mit Baserow
+
+Beetwerk schreibt Merkmale, Pflanzen und Boniturwerte samt Fotos in eine Baserow-Datenbank. Die Richtung ist vorerst nur Beetwerk → Baserow: Geändert wird in Beetwerk. Ändert sich ein Eintrag in Beetwerk, überschreibt der Abgleich die Zeile in Baserow.
+
+**Einrichten** unter Einstellungen → Baserow → „Mit Baserow verbinden“:
+
+1. **Adresse** eintragen, am besten dieselbe wie im Browser (`BASEROW_PUBLIC_URL`, z. B. `http://192.168.178.20:8090`). `localhost` geht nicht, weil Beetwerk in einem eigenen Container läuft. Baserow nimmt nur Anfragen an Adressen an, die es kennt. Wer eine andere Adresse nutzen will, z. B. die IP statt eines Namens, trägt sie in Baserow unter `BASEROW_EXTRA_ALLOWED_HOSTS` ein.
+2. **Tabellen anlegen lassen:** einmal mit E-Mail und Passwort anmelden, Datenbank wählen und optional deine Sorten- und Etikettentabelle. Beetwerk legt die drei Tabellen an (oder ergänzt fehlende Felder, wenn es sie schon gibt) und dazu einen Datenbank-Token „Beetwerk“. Gespeichert wird nur der Token, nicht das Passwort. Bei Konten mit Zwei-Faktor-Anmeldung geht das nicht; dann gilt Schritt 3.
+3. **Oder eigene Tabellen nutzen:** Tabellen mit genau diesen Feldnamen selbst anlegen, einen Datenbank-Token mit Lese- und Schreibrecht erstellen und Token sowie die drei Tabellen-IDs eintragen. Beetwerk prüft die Felder und nennt fehlende.
+
+| Tabelle | Felder (das erste ist das Hauptfeld) |
+|---|---|
+| Bonitur-Merkmale | Merkmal, Schlüssel, Kultur, Bereich, Häufigkeit, Ebene, Werttyp, Auswahlwerte, Einheit, Zeitpunkt, Hinweis, Vorlage, Aktiv, Beetwerk-ID |
+| Bonitur-Pflanzen | Pflanze, Etikett, Jahr, Kultur, Sorte, Beet, Satz, Nr, Reihe, Platz, Status, Notiz, Beetwerk-ID |
+| Boniturwerte | Eintrag, Datum, Pflanze, Merkmal, Sorte, Satz, Ebene, Wert, Zahl, Einheit, Einzelwerte, Notiz, Foto, Beetwerk-ID, Geändert |
+
+„Pflanze“ und „Merkmal“ in „Boniturwerte“ sind Verknüpfungen zu den anderen beiden Tabellen. Sind Sorten- oder Etikettentabelle gewählt, kommen „Sorte verknüpft“ (in Pflanzen und Werten) und „Etikett verknüpft“ (in Pflanzen) dazu. Beetwerk findet die passende Zeile über das Hauptfeld dieser Tabellen, also den Sortennamen bzw. die Etikett-ID, oder über das Feld `ref` einer Sorte im Mischsatz, wenn dort die Zeilen-ID steht. Deine vorhandenen Tabellen bekommen dabei keine neuen Felder.
+
+**Abgleich:** Etwa 15 Sekunden nach einer Änderung in der Bonitur, alle 30 Minuten und mit „Jetzt abgleichen“ (in den Einstellungen oder über den Hinweis „Baserow ✓“ auf der Bonitur-Seite). Übertragen wird nur, was sich seit dem letzten Mal geändert hat. In Beetwerk gelöschte Werte und Pflanzen werden auch in Baserow gelöscht; eine in Baserow gelöschte Zeile legt Beetwerk bei der nächsten Änderung neu an. Fotos landen im Dateifeld „Foto“. Ist Baserow nicht erreichbar, bleibt alles in Beetwerk gespeichert und wird später nachgeholt.
+
+`BEETWERK_BASEROW_DELAY` (Sekunden, Standard 15) ändert die Wartezeit nach einer Änderung; `0` schaltet den automatischen Abgleich ab.
 
 ## Grundstück auf dem Luftbild
 
@@ -232,6 +252,7 @@ Bonitur:
 - `POST /api/photos` (Bild als Rohdaten), `GET /api/photos/{name}`
 - `GET /api/bonitur.csv?year=2026`
 - `POST/PATCH/DELETE /api/traits` und `/api/trait-sets` für eigene Merkmale und Vorlagen
+- `GET /api/baserow` Zustand des Abgleichs, `POST /api/baserow/sync` gleicht sofort ab, `POST /api/baserow/setup` bzw. `/connect` richten ein, `DELETE /api/baserow` trennt
 
 Ein Mischsatz trägt `varieties` (Liste aus `{"name", "count", "ref"}`), `fill` (`snake` oder `columns`) und `fill_start` (`tl`, `tr`, `bl`, `br`). Eine leere Liste macht ihn wieder zum normalen Satz mit `variety`.
 
@@ -254,6 +275,7 @@ Aufbau:
 - `app/seed.py`: Kulturen und Beispielgarten
 - `app/geo.py`: Koordinaten zwischen Grundstück und Erde, Luftbild-Abruf
 - `app/bonitur.py`: Merkmalkatalog, Einzelpflanzen, Boniturwerte, Fotos und CSV
+- `app/baserow.py`: Einrichtung und Abgleich mit Baserow (`tests/fakebaserow.py` ist ein künstliches Baserow für Tests: `python tests/fakebaserow.py 8793`, Anmeldung `garten@example.org` / `geheim`)
 - `app/static/`: Oberfläche ohne Build-Schritt, reines JavaScript mit ES-Modulen (`map.js` Beetkarte, `timeline.js` Zeitleiste, `plantings.js` Sätze und Aufgaben, `editor.js` Dialoge, `geosetup.js` Grundstück auf dem Luftbild, `bonitur.js` Bonitur mit `bstore.js` und `bwidgets.js`, `store.js` Zustand und Rückgängig)
 - `docker-entrypoint.py`: übergibt den Datenordner an PUID/PGID und startet ohne root
 - `unraid/beetwerk.xml`: Vorlage für Unraid

@@ -14,6 +14,7 @@ import {
   LEVEL_LABEL, TYPE_LABEL, GROUP_LABEL, bbchText,
 } from "./bstore.js";
 import { widget } from "./bwidgets.js";
+import { baserowStatus, statusChip, syncNow } from "./baserowsetup.js";
 
 function readSession(key) {
   try { return JSON.parse(sessionStorage.getItem(`beetwerk.${key}`)); } catch { return null; }
@@ -155,7 +156,32 @@ function donorNames() {
 export function mountBonitur(root) {
   const page = h("div", { class: "page bon-page" });
   root.append(page);
-  const off = onBon(() => render());
+  // Zustand des Abgleichs mit Baserow: beim Öffnen, regelmäßig und kurz nach dem Speichern
+  let bsr = null;
+  const bsrTimers = {};
+  const refreshBsr = async () => {
+    try { bsr = await baserowStatus({ fresh: true }); } catch { bsr = null; }
+    // Solange Werte warten und der Abgleich automatisch läuft, bald noch einmal nachsehen
+    if (bsr?.connected && bsr.auto && (bsr.pending || bsr.running) && !bsr.last_error) later("after", 8000);
+    const chip = page.querySelector(".baserow-chip");
+    const next = statusChip(bsr, onChip);
+    if (chip && next) chip.replaceWith(next);
+    else if (chip) chip.remove();
+    else if (next) render();
+  };
+  const onChip = async (e) => {
+    e.currentTarget.disabled = true;
+    try { await syncNow(); } catch { /* Meldung kam schon */ }
+    refreshBsr();
+  };
+  const later = (name, ms) => { clearTimeout(bsrTimers[name]); bsrTimers[name] = setTimeout(refreshBsr, ms); };
+  refreshBsr();
+  const bsrPoll = setInterval(() => { if (document.visibilityState === "visible") refreshBsr(); }, 60000);
+  const off = onBon(() => {
+    render();
+    later("quick", 1500);                                  // „Werte warten“ zeigen
+    if (bsr?.connected && bsr.auto) later("after", 22000);  // nach dem automatischen Abgleich
+  });
   // Beim Öffnen und beim Zurückkehren in den Browser frisch laden (z. B. Werte vom Handy)
   loadBonitur(yearOf(ui.date), { force: true });
   const onVisible = () => { if (document.visibilityState === "visible") loadBonitur(yearOf(ui.date), { force: true }); };
@@ -210,6 +236,7 @@ export function mountBonitur(root) {
       h("label", { class: "bon-date-wrap" }, h("span", { class: "muted small" }, "Datum"), date,
         ui.date !== todayNum() ? h("button", { type: "button", class: "btn btn-sm btn-quiet", onclick: () => { ui.date = todayNum(); render(); } }, "Heute") : null),
       search,
+      statusChip(bsr, onChip),
       h("button", { type: "button", class: "btn", onclick: () => openCatalog() }, "Merkmale"),
       h("a", { class: "btn", href: `/api/bonitur.csv?year=${year}`, download: `bonitur-${year}.csv`, title: "Alle Werte des Jahres als Tabelle (CSV)" },
         icon("download"), "CSV"));
@@ -1096,6 +1123,8 @@ export function mountBonitur(root) {
     update(reason) { if (reason === "data") render(); },
     destroy() {
       off();
+      clearInterval(bsrPoll);
+      Object.values(bsrTimers).forEach(clearTimeout);
       document.removeEventListener("visibilitychange", onVisible);
       document.body.classList.remove("bon-bar-on");
     },

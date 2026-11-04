@@ -148,7 +148,7 @@ h3 { font-size: 15px; }
 .btn:disabled, .btn[disabled] { opacity: .45; cursor: not-allowed; }
 .btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 
-.field { display: grid; gap: 4px; }
+.field { display: grid; gap: 4px; align-content: start; }
 .field > span { font-size: 13px; color: var(--ink-2); font-weight: 500; }
 .field input, .field select, .field textarea, .input {
   width: 100%; min-width: 0; min-height: 36px; padding: 6px 10px;
@@ -1167,3 +1167,15 @@ body.bon-bar-on .toasts { bottom: calc(84px + var(--tabbar-h)); }
   .history-row { grid-template-columns: minmax(0, 1fr) auto; }
   .history-row .t { grid-column: 1 / -1; font-size: 13px; }
 }
+
+/* ------------------------------------------------------------- Baserow */
+
+.baserow-chip { font-size: 13.5px; color: var(--leaf); border-color: var(--leaf-soft); background: var(--leaf-soft); }
+.baserow-chip.wait { color: var(--warn); border-color: var(--warn-soft); background: var(--warn-soft); }
+.baserow-chip.error { color: var(--alert); border-color: var(--alert-soft); background: var(--alert-soft); }
+.baserow-mode { display: grid; gap: 12px; }
+.baserow-spec { display: grid; gap: 4px; }
+.baserow-spec details { border: 1px solid var(--line); border-radius: var(--r-s); padding: 6px 10px; background: #fff; }
+.baserow-spec summary { cursor: pointer; font-weight: 500; }
+.baserow-spec ul { margin: 6px 0 2px; padding-left: 18px; font-size: 13.5px; columns: 2; column-gap: 24px; }
+@media (max-width: 760px) { .baserow-spec ul { columns: 1; } }
