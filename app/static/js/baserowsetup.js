@@ -80,6 +80,9 @@ export function baserowSection(closeSettings) {
           st.last_sync ? `Zuletzt abgeglichen ${fmtWhen(st.last_sync)} (${resultText(st.last_result)}). ` : "Noch nicht abgeglichen. ",
           st.pending ? `${plural(st.pending, "Wert wartet", "Werte warten")} auf die Übertragung.` : ""),
         st.last_error ? h("p", { class: "form-error", style: { margin: 0 } }, st.last_error) : null,
+        st.missing?.length ? h("p", { class: "small warn-note", style: { margin: 0 } },
+          `Neu: Beetwerk kann auch ${st.missing.map((n) => `„${n}“`).join(", ")} nach Baserow schreiben. `
+          + "Mit „Neu einrichten“ legt es die Tabellen an; vorhandene Tabellen und Werte bleiben.") : null,
         h("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap" } },
           h("button", { type: "button", class: "btn", onclick: async (e) => {
             e.currentTarget.disabled = true;
@@ -115,14 +118,15 @@ export function openBaserowSetup(st, after) {
   const varSel = h("select", {});
   const labelSel = h("select", {});
   const token = h("input", { autocomplete: "off", spellcheck: "false" });
-  const ids = { traits: h("input", { inputmode: "numeric" }), plants: h("input", { inputmode: "numeric" }), observations: h("input", { inputmode: "numeric" }) };
+  const ids = Object.fromEntries(["traits", "plants", "observations", "crops", "varieties", "plantings"]
+    .map((k) => [k, h("input", { inputmode: "numeric" })]));
   for (const [k, el] of Object.entries(ids)) el.value = st?.tables?.[k] ?? "";
   const submit = h("button", { type: "submit", class: "btn btn-primary" });
 
   const fillTables = () => {
     const db = dbs?.find((d) => String(d.id) === dbSel.value);
     const opts = (re) => [h("option", { value: "" }, "keine"),
-      ...(db?.tables || []).filter((t) => !/^(Bonitur-Merkmale|Bonitur-Pflanzen|Boniturwerte)$/.test(t.name))
+      ...(db?.tables || []).filter((t) => !/^(Bonitur-Merkmale|Bonitur-Pflanzen|Boniturwerte|Kulturen|Beetwerk-Sorten|Sätze)$/.test(t.name))
         .map((t) => h("option", { value: t.id, selected: re.test(t.name) }, t.name))];
     varSel.replaceChildren(...opts(/sorte/i));
     labelSel.replaceChildren(...opts(/etikett|label/i));
@@ -157,8 +161,8 @@ export function openBaserowSetup(st, after) {
     manualBox.hidden = mode !== "manual";
     autoBox.replaceChildren(...[
       h("p", { class: "muted small", style: { margin: 0 } },
-        "Melde dich einmal mit deinem Baserow-Konto an. Beetwerk legt in der gewählten Datenbank die Tabellen „Bonitur-Merkmale“, "
-        + "„Bonitur-Pflanzen“ und „Boniturwerte“ an (gibt es sie schon, ergänzt es fehlende Felder) sowie einen Datenbank-Token „Beetwerk“. "
+        "Melde dich einmal mit deinem Baserow-Konto an. Beetwerk legt in der gewählten Datenbank die Tabellen „Kulturen“, „Beetwerk-Sorten“, „Sätze“, "
+        + "„Bonitur-Merkmale“, „Bonitur-Pflanzen“ und „Boniturwerte“ an (gibt es sie schon, ergänzt es fehlende Felder) sowie einen Datenbank-Token „Beetwerk“. "
         + "Das Passwort wird nicht gespeichert."),
       h("div", { class: "grid-2 stack-sm" }, field("E-Mail", email), field("Passwort", password)),
       h("div", {}, loadBtn),
@@ -173,7 +177,9 @@ export function openBaserowSetup(st, after) {
       specList,
       field("Datenbank-Token", token),
       h("div", { class: "grid-3" }, field("Bonitur-Merkmale (ID)", ids.traits), field("Bonitur-Pflanzen (ID)", ids.plants),
-        field("Boniturwerte (ID)", ids.observations)));
+        field("Boniturwerte (ID)", ids.observations)),
+      h("div", { class: "grid-3" }, field("Kulturen (ID, optional)", ids.crops), field("Beetwerk-Sorten (ID, optional)", ids.varieties),
+        field("Sätze (ID, optional)", ids.plantings)));
     submit.textContent = mode === "auto" ? "Tabellen anlegen und verbinden" : "Prüfen und verbinden";
     submit.disabled = mode === "auto" && !dbs;
   }
@@ -196,9 +202,11 @@ export function openBaserowSetup(st, after) {
             if (!Number.isInteger(v) || v < 1) throw new Error(`Bitte die ID der Tabelle „${what}“ eintragen`);
             return v;
           };
+          const opt = (el) => (el.value.trim() ? Number(el.value) : null);
           res = await api.post("/api/baserow/connect", {
             url: url.value, token: token.value, traits_table_id: n(ids.traits, "Bonitur-Merkmale"),
             plants_table_id: n(ids.plants, "Bonitur-Pflanzen"), observations_table_id: n(ids.observations, "Boniturwerte"),
+            crops_table_id: opt(ids.crops), varieties_table_id: opt(ids.varieties), plantings_table_id: opt(ids.plantings),
           });
         }
         remember(res);

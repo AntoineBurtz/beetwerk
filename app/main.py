@@ -17,15 +17,15 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import baserow, bonitur, db, geo, weather
+from . import baserow, bonitur, db, geo, research, varieties, weather
 from .seed import guess_trait_groups, seed_demo
 
 VERSION = "1.1.0"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 IMAGE_PATH = db.DATA_DIR / "imagery" / "garden.jpg"
-INTERNAL_SETTINGS = {"geo", "imagery_custom", bonitur.SEEDED_KEY, *weather.STATE_KEYS, *baserow.KEYS}
+INTERNAL_SETTINGS = {"geo", "imagery_custom", bonitur.SEEDED_KEY, *weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
 # Nicht in die Sicherung: Abrufzustand und Zugangsdaten
-NOT_EXPORTED = {*weather.STATE_KEYS, *baserow.KEYS}
+NOT_EXPORTED = {*weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -56,7 +56,7 @@ async def fresh_ui(request: Request, call_next):
     return response
 
 
-BONITUR_WRITES = re.compile(r"^/api/(observations|plants|traits|plantings/\d+/(plants|labels))(/|$)")
+BONITUR_WRITES = re.compile(r"^/api/(observations|plants|traits|plantings|crops|beds|varieties)(/|$)")
 
 
 @app.middleware("http")
@@ -348,6 +348,7 @@ def all_data():
             "beds": db.rows(conn, "SELECT * FROM beds ORDER BY sort, name"),
             "crops": db.rows(conn, "SELECT * FROM crops ORDER BY name"),
             "plantings": [_planting_out(p) for p in db.rows(conn, "SELECT * FROM plantings ORDER BY sow_date, id")],
+            "varieties": [varieties.variety_out(v) for v in db.rows(conn, "SELECT * FROM varieties ORDER BY name COLLATE NOCASE")],
         }
 
 
@@ -407,6 +408,10 @@ def delete_crop(crop_id: int):
         used = conn.execute("SELECT COUNT(*) FROM plantings WHERE crop_id = ?", (crop_id,)).fetchone()[0]
         if used:
             _err(409, f"Die Kultur wird noch in {used} {'Satz' if used == 1 else 'Sätzen'} verwendet")
+        listed = conn.execute("SELECT COUNT(*) FROM varieties WHERE crop_id = ?", (crop_id,)).fetchone()[0]
+        if listed:
+            _err(409, f"Zu dieser Kultur stehen noch {listed} {'Sorte' if listed == 1 else 'Sorten'} in der Sortenliste")
+        bonitur._forget(conn, "crops", _get(conn, "crops", crop_id))
         conn.execute("DELETE FROM crops WHERE id = ?", (crop_id,))
     return Response(status_code=204)
 
@@ -457,6 +462,9 @@ def delete_planting(planting_id: int):
         if used:
             _err(409, f"Für diesen Satz gibt es {used} {'Boniturwert' if used == 1 else 'Boniturwerte'}. "
                       "Lösche zuerst die Werte in der Bonitur oder behalte den Satz.")
+        for plant in db.rows(conn, "SELECT * FROM plants WHERE planting_id = ?", (planting_id,)):
+            bonitur._forget(conn, "plants", plant)
+        bonitur._forget(conn, "plantings", _get(conn, "plantings", planting_id))
         conn.execute("DELETE FROM plants WHERE planting_id = ?", (planting_id,))
         conn.execute("DELETE FROM plantings WHERE id = ?", (planting_id,))
     return Response(status_code=204)
@@ -522,20 +530,23 @@ async def import_all(request: Request):
         bonitur.clear_tables(conn)
         conn.execute("DELETE FROM plantings")
         conn.execute("DELETE FROM beds")
+        conn.execute("DELETE FROM varieties")
         conn.execute("DELETE FROM crops")
-        keep = {k: v for k, v in _settings(conn).items() if k in baserow.KEYS}
+        keep = {k: v for k, v in _settings(conn).items() if k in baserow.KEYS or k in research.KEYS}
         conn.execute("DELETE FROM settings")
         conn.execute("DELETE FROM sqlite_sequence")
         for key, value in (data.get("settings") or {}).items():
             if key in NOT_EXPORTED:
                 continue
             conn.execute("INSERT INTO settings(key, value) VALUES (?, ?)", (key, str(value)))
-        for table in ("crops", "beds", "plantings"):
+        for table in ("crops", "varieties", "beds", "plantings"):
             cols = {r["name"] for r in db.rows(conn, f"PRAGMA table_info({table})")}
             for item in data.get(table) or []:
                 record = {k: v for k, v in item.items() if k in cols}
                 if table == "plantings" and isinstance(record.get("varieties"), list):
                     _encode_varieties(record)
+                if table == "varieties" and isinstance(record.get("links"), list):
+                    record["links"] = json.dumps(record["links"], ensure_ascii=False) if record["links"] else ""
                 conn.execute(
                     f"INSERT INTO {table}({', '.join(record)}) VALUES ({', '.join('?' for _ in record)})",
                     list(record.values()),
@@ -651,4 +662,5 @@ def delete_garden_geo():
 
 app.include_router(bonitur.router)
 app.include_router(baserow.router)
+app.include_router(varieties.router)
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

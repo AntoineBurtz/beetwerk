@@ -20,6 +20,8 @@ Dazu gibt es:
 - Wetter-Seite mit Diagrammen und Monatstabelle, jeweils im Vergleich zum Mittel der letzten 20 Jahre.
 - Mischsatz: viele Sorten einer Kultur (z. B. 15 Tomatensorten zu je 4 bis 10 Pflanzen) als ein Satz, mit Sortenliste, Pflanzschema und Pflanzplan zum Herunterladen.
 - Bonitur: Pflanzen einzeln oder als Block bewerten, mit BBCH-Bildern, Merkmalen nach UPOV für Tomate und Paprika/Chili, Sortenvergleich und CSV-Export.
+- Sortenliste mit Foto und Quellen; neue Samen recherchiert Claude im Netz (auch vom Foto des Samentütchens).
+- Abgleich mit Baserow: Kulturen, Sorten, Sätze und die Bonitur landen in deiner Baserow-Datenbank.
 
 ## Wetter und Gießen
 
@@ -104,7 +106,7 @@ Die BBCH-Zeichnungen liegen im Original unter `assets/bbch/<kultur>/` (Dateiname
 
 ### Abgleich mit Baserow
 
-Beetwerk schreibt Merkmale, Pflanzen und Boniturwerte samt Fotos in eine Baserow-Datenbank. Die Richtung ist vorerst nur Beetwerk → Baserow: Geändert wird in Beetwerk. Ändert sich ein Eintrag in Beetwerk, überschreibt der Abgleich die Zeile in Baserow.
+Beetwerk schreibt Kulturen, die Sortenliste, Sätze sowie Merkmale, Pflanzen und Boniturwerte samt Fotos in eine Baserow-Datenbank. Die Richtung ist vorerst nur Beetwerk → Baserow: Geändert wird in Beetwerk. Ändert sich ein Eintrag in Beetwerk, überschreibt der Abgleich die Zeile in Baserow.
 
 **Einrichten** unter Einstellungen → Baserow → „Mit Baserow verbinden“:
 
@@ -114,15 +116,26 @@ Beetwerk schreibt Merkmale, Pflanzen und Boniturwerte samt Fotos in eine Baserow
 
 | Tabelle | Felder (das erste ist das Hauptfeld) |
 |---|---|
+| Kulturen | Kultur, Familie, Anbauart, Anzucht (Tage), Bis Ernte (Tage), Erntedauer (Tage), Reihenabstand (cm), Pflanzabstand (cm), Bonitur-Merkmale, Farbe, Notizen, Beetwerk-ID |
+| Beetwerk-Sorten | Sorte, Kultur, Botanische Art, Typ, Saatgut, Wuchs, Fruchtfarbe, Reife, Bezugsquelle, Gekauft, Beschreibung, Foto, Bildquelle, Quellen, Notizen, Beetwerk-ID |
+| Sätze | Satz, Kultur, Sorten, Sorten (Text), Beet, Anbau, Jahr, Aussaat, Pflanzung, Ernte ab, Ernte bis, Pflanzen, Fläche (m²), Notizen, Beetwerk-ID |
 | Bonitur-Merkmale | Merkmal, Schlüssel, Kultur, Bereich, Häufigkeit, Ebene, Werttyp, Auswahlwerte, Einheit, Zeitpunkt, Hinweis, Vorlage, Aktiv, Beetwerk-ID |
-| Bonitur-Pflanzen | Pflanze, Etikett, Jahr, Kultur, Sorte, Beet, Satz, Nr, Reihe, Platz, Status, Notiz, Beetwerk-ID |
+| Bonitur-Pflanzen | Pflanze, Etikett, Jahr, Kultur, Sorte, Beet, Satz, Nr, Reihe, Platz, Status, Notiz, Beetwerk-ID, Beetwerk-Sorte |
 | Boniturwerte | Eintrag, Datum, Pflanze, Merkmal, Sorte, Satz, Ebene, Wert, Zahl, Einheit, Einzelwerte, Notiz, Foto, Beetwerk-ID, Geändert |
 
-„Pflanze“ und „Merkmal“ in „Boniturwerte“ sind Verknüpfungen zu den anderen beiden Tabellen. Sind Sorten- oder Etikettentabelle gewählt, kommen „Sorte verknüpft“ (in Pflanzen und Werten) und „Etikett verknüpft“ (in Pflanzen) dazu. Beetwerk findet die passende Zeile über das Hauptfeld dieser Tabellen, also den Sortennamen bzw. die Etikett-ID, oder über das Feld `ref` einer Sorte im Mischsatz, wenn dort die Zeilen-ID steht. Deine vorhandenen Tabellen bekommen dabei keine neuen Felder.
+„Pflanze“ und „Merkmal“ in „Boniturwerte“ sind Verknüpfungen zu den anderen beiden Tabellen, ebenso „Kultur“ und „Sorten“ in „Beetwerk-Sorten“ und „Sätze“ sowie „Beetwerk-Sorte“ in „Bonitur-Pflanzen“. Wer schon mit einer älteren Version verbunden ist, legt die neuen Tabellen mit „Neu einrichten“ an; vorhandene Tabellen, Werte und der Token bleiben. Sind Sorten- oder Etikettentabelle gewählt, kommen „Sorte verknüpft“ (in Pflanzen und Werten) und „Etikett verknüpft“ (in Pflanzen) dazu. Beetwerk findet die passende Zeile über das Hauptfeld dieser Tabellen, also den Sortennamen bzw. die Etikett-ID, oder über das Feld `ref` einer Sorte im Mischsatz, wenn dort die Zeilen-ID steht. Deine vorhandenen Tabellen bekommen dabei keine neuen Felder.
 
 **Abgleich:** Etwa 15 Sekunden nach einer Änderung in der Bonitur, alle 30 Minuten und mit „Jetzt abgleichen“ (in den Einstellungen oder über den Hinweis „Baserow ✓“ auf der Bonitur-Seite). Übertragen wird nur, was sich seit dem letzten Mal geändert hat. In Beetwerk gelöschte Werte und Pflanzen werden auch in Baserow gelöscht; eine in Baserow gelöschte Zeile legt Beetwerk bei der nächsten Änderung neu an. Fotos landen im Dateifeld „Foto“. Ist Baserow nicht erreichbar, bleibt alles in Beetwerk gespeichert und wird später nachgeholt.
 
 `BEETWERK_BASEROW_DELAY` (Sekunden, Standard 15) ändert die Wartezeit nach einer Änderung; `0` schaltet den automatischen Abgleich ab.
+
+## Sortenliste und Saatgut-Recherche
+
+Unter **Kulturen → Sorten** steht die Sortenliste: Kultur, botanische Art, Typ, Saatgut (samenfest oder F1), Wuchs, Fruchtfarbe, Reife, Bezugsquelle, Beschreibung, Foto mit Bildquelle und Quellen. „Aus Sätzen übernehmen“ legt alle Sorten an, die schon in deinen Sätzen stehen. Im Satz-Dialog schlägt Beetwerk die Sorten der gewählten Kultur vor.
+
+**Neue Samen recherchieren:** Sortennamen eingeben oder das Samentütchen fotografieren. Claude sucht im Netz, bevorzugt bei Saatgut-Händlern und Erhalterorganisationen, und schlägt die Einordnung vor. Dazu kommen Bilder zur Auswahl: frei lizenzierte von Wikimedia Commons und das Vorschaubild der gefundenen Seiten. Du prüfst und änderst alles, bevor es gespeichert wird; das gewählte Bild lädt Beetwerk herunter und legt es mit Quelle ab. Shopfotos sind urheberrechtlich geschützt und taugen für die eigene Sortenliste, nicht zum Veröffentlichen. „Mit Claude ergänzen“ im Dialog einer Sorte füllt nur leere Felder.
+
+Dafür braucht es einen API-Schlüssel aus der [Claude Console](https://console.anthropic.com/), einzutragen unter Einstellungen → KI-Recherche. Der Schlüssel bleibt auf deinem Server und steht nicht in der Sicherung. Abgerechnet wird je Nutzung: die Websuche kostet 1 Cent je Suchanfrage (höchstens fünf je Sorte), dazu kommen die Tokens. Jede Recherche zeigt, wie viele Suchen und Tokens sie gebraucht hat. Der Server braucht dafür Internet.
 
 ## Grundstück auf dem Luftbild
 
@@ -252,6 +265,8 @@ Bonitur:
 - `POST /api/photos` (Bild als Rohdaten), `GET /api/photos/{name}`
 - `GET /api/bonitur.csv?year=2026`
 - `POST/PATCH/DELETE /api/traits` und `/api/trait-sets` für eigene Merkmale und Vorlagen
+- `GET/POST/PATCH/DELETE /api/varieties` Sortenliste, `POST /api/varieties/collect` übernimmt Sorten aus den Sätzen
+- `POST /api/research/variety` recherchiert eine Sorte (`{"name", "crop_id", "hint", "image"}`), `POST /api/photos/from-url` holt ein Bild
 - `GET /api/baserow` Zustand des Abgleichs, `POST /api/baserow/sync` gleicht sofort ab, `POST /api/baserow/setup` bzw. `/connect` richten ein, `DELETE /api/baserow` trennt
 
 Ein Mischsatz trägt `varieties` (Liste aus `{"name", "count", "ref"}`), `fill` (`snake` oder `columns`) und `fill_start` (`tl`, `tr`, `bl`, `br`). Eine leere Liste macht ihn wieder zum normalen Satz mit `variety`.
@@ -275,6 +290,7 @@ Aufbau:
 - `app/seed.py`: Kulturen und Beispielgarten
 - `app/geo.py`: Koordinaten zwischen Grundstück und Erde, Luftbild-Abruf
 - `app/bonitur.py`: Merkmalkatalog, Einzelpflanzen, Boniturwerte, Fotos und CSV
+- `app/varieties.py` und `app/research.py`: Sortenliste und Recherche mit Claude (`tests/fakeclaude.py` ist eine künstliche Claude-Schnittstelle samt Commons und Shop für Tests: `python tests/fakeclaude.py 8794`, Schlüssel `sk-test`)
 - `app/baserow.py`: Einrichtung und Abgleich mit Baserow (`tests/fakebaserow.py` ist ein künstliches Baserow für Tests: `python tests/fakebaserow.py 8793`, Anmeldung `garten@example.org` / `geheim`)
 - `app/static/`: Oberfläche ohne Build-Schritt, reines JavaScript mit ES-Modulen (`map.js` Beetkarte, `timeline.js` Zeitleiste, `plantings.js` Sätze und Aufgaben, `editor.js` Dialoge, `geosetup.js` Grundstück auf dem Luftbild, `bonitur.js` Bonitur mit `bstore.js` und `bwidgets.js`, `store.js` Zustand und Rückgängig)
 - `docker-entrypoint.py`: übergibt den Datenordner an PUID/PGID und startet ohne root
