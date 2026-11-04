@@ -47,6 +47,12 @@ RIPE = (81, 99)
 SEASON_END = (85, 99)
 
 SECTIONS = ("regular", "plant", "flower", "fruit", "taste", "breeding")
+SECTION_TEXT = {"regular": "regelmäßig", "plant": "Pflanze und Blatt", "flower": "Blüte", "fruit": "Frucht",
+                "taste": "Verkostung", "breeding": "Kreuzung und Saatgut"}
+FREQ_TEXT = {"repeat": "regelmäßig", "once": "einmalig", "event": "je Ereignis"}
+LEVEL_TEXT = {"plant": "je Pflanze", "variety": "je Sorte", "both": "je Pflanze oder Sorte"}
+TYPE_TEXT = {"bbch": "BBCH-Stadium", "score": "Note", "choice": "Auswahl", "multi": "Mehrfachauswahl", "number": "Zahl",
+             "text": "Text", "photo": "Foto", "rated": "Befall mit Note", "cross": "Kreuzung", "amount": "Menge"}
 TYPES = ("bbch", "score", "choice", "multi", "number", "text", "photo", "rated", "cross", "amount")
 
 
@@ -315,6 +321,12 @@ def set_out(row: dict) -> dict:
     return row
 
 
+def _forget(conn, kind: str, row: dict) -> None:
+    """Gelöschte Zeile vormerken, damit der Abgleich sie auch in Baserow löscht."""
+    if row.get("baserow_id"):
+        conn.execute("INSERT INTO baserow_deleted(kind, row_id) VALUES (?, ?)", (kind, row["baserow_id"]))
+
+
 def _get(conn, table: str, item_id: int) -> dict:
     row = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (item_id,)).fetchone()
     if row is None:
@@ -457,6 +469,7 @@ def delete_trait(trait_id: int):
         used = conn.execute("SELECT COUNT(*) FROM observations WHERE trait_id = ?", (trait_id,)).fetchone()[0]
         if used:
             _err(409, f"Für dieses Merkmal gibt es {used} {'Wert' if used == 1 else 'Werte'}; schalte es stattdessen aus")
+        _forget(conn, "traits", t)
         conn.execute("DELETE FROM traits WHERE id = ?", (trait_id,))
     return Response(status_code=204)
 
@@ -569,6 +582,8 @@ def fix_plants(planting_id: int, body: PlantsIn):
                 _err(409, "Es gibt schon Boniturwerte für einzelne Pflanzen; füge Pflanzen lieber einzeln hinzu")
             if conn.execute("SELECT 1 FROM plants WHERE planting_id = ? AND label <> ''", (planting_id,)).fetchone():
                 _err(409, "Einige Pflanzen haben schon ein Etikett; füge Pflanzen lieber einzeln hinzu")
+            for old in _plants_of(conn, planting_id):
+                _forget(conn, "plants", old)
             conn.execute("DELETE FROM plants WHERE planting_id = ?", (planting_id,))
         now = _now()
         for i, spot in enumerate(body.plants, start=1):
@@ -619,10 +634,11 @@ def update_plant(plant_id: int, body: PlantIn):
 @router.delete("/api/plants/{plant_id}", status_code=204)
 def delete_plant(plant_id: int):
     with db.session() as conn:
-        _get(conn, "plants", plant_id)
+        plant = _get(conn, "plants", plant_id)
         used = conn.execute("SELECT COUNT(*) FROM observations WHERE plant_id = ?", (plant_id,)).fetchone()[0]
         if used:
             _err(409, f"Die Pflanze hat {used} {'Wert' if used == 1 else 'Werte'}; markiere sie stattdessen als ausgefallen")
+        _forget(conn, "plants", plant)
         conn.execute("DELETE FROM plants WHERE id = ?", (plant_id,))
     return Response(status_code=204)
 
@@ -888,7 +904,7 @@ def update_observation(obs_id: int, body: ObsPatch):
 @router.delete("/api/observations/{obs_id}", status_code=204)
 def delete_observation(obs_id: int):
     with db.session() as conn:
-        _get(conn, "observations", obs_id)
+        _forget(conn, "observations", _get(conn, "observations", obs_id))
         conn.execute("DELETE FROM observations WHERE id = ?", (obs_id,))
     return Response(status_code=204)
 

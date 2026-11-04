@@ -5,6 +5,7 @@ Start lokal:  uvicorn app.main:app --reload
 import base64
 import json
 import os
+import re
 import secrets
 from contextlib import asynccontextmanager
 from datetime import date
@@ -16,17 +17,20 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import bonitur, db, geo, weather
+from . import baserow, bonitur, db, geo, weather
 from .seed import guess_trait_groups, seed_demo
 
 VERSION = "1.1.0"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 IMAGE_PATH = db.DATA_DIR / "imagery" / "garden.jpg"
-INTERNAL_SETTINGS = {"geo", "imagery_custom", bonitur.SEEDED_KEY, *weather.STATE_KEYS}
+INTERNAL_SETTINGS = {"geo", "imagery_custom", bonitur.SEEDED_KEY, *weather.STATE_KEYS, *baserow.KEYS}
+# Nicht in die Sicherung: Abrufzustand und Zugangsdaten
+NOT_EXPORTED = {*weather.STATE_KEYS, *baserow.KEYS}
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.init_db()
+    baserow.start_background()
     yield
 
 
@@ -49,6 +53,18 @@ async def fresh_ui(request: Request, call_next):
     response = await call_next(request)
     if not request.url.path.startswith("/api/") and "cache-control" not in response.headers:
         response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+BONITUR_WRITES = re.compile(r"^/api/(observations|plants|traits|plantings/\d+/(plants|labels))(/|$)")
+
+
+@app.middleware("http")
+async def baserow_after_change(request: Request, call_next):
+    """Nach Änderungen an der Bonitur den Abgleich mit Baserow anstoßen (falls verbunden)."""
+    response = await call_next(request)
+    if request.method != "GET" and response.status_code < 400 and BONITUR_WRITES.match(request.url.path):
+        baserow.schedule()
     return response
 
 
@@ -484,7 +500,7 @@ def climate():
 def export_all():
     data = all_data()
     with db.session() as conn:
-        data["settings"] = {k: v for k, v in _settings(conn).items() if k not in weather.STATE_KEYS}
+        data["settings"] = {k: v for k, v in _settings(conn).items() if k not in NOT_EXPORTED}
         data.update(bonitur.export_tables(conn))
     data.pop("geo", None)
     data.pop("imagery", None)
@@ -507,10 +523,11 @@ async def import_all(request: Request):
         conn.execute("DELETE FROM plantings")
         conn.execute("DELETE FROM beds")
         conn.execute("DELETE FROM crops")
+        keep = {k: v for k, v in _settings(conn).items() if k in baserow.KEYS}
         conn.execute("DELETE FROM settings")
         conn.execute("DELETE FROM sqlite_sequence")
         for key, value in (data.get("settings") or {}).items():
-            if key in weather.STATE_KEYS:
+            if key in NOT_EXPORTED:
                 continue
             conn.execute("INSERT INTO settings(key, value) VALUES (?, ?)", (key, str(value)))
         for table in ("crops", "beds", "plantings"):
@@ -526,7 +543,7 @@ async def import_all(request: Request):
         if any("trait_group" not in c for c in data.get("crops") or []):
             guess_trait_groups(conn)  # ältere Sicherung ohne Bonitur-Zuordnung
         bonitur.import_tables(conn, data)
-        for key, value in db.DEFAULT_SETTINGS.items():
+        for key, value in {**db.DEFAULT_SETTINGS, **keep}.items():
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
     return all_data()
 
@@ -633,4 +650,5 @@ def delete_garden_geo():
 # ---------------------------------------------------------------- Bonitur und Oberfläche
 
 app.include_router(bonitur.router)
+app.include_router(baserow.router)
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

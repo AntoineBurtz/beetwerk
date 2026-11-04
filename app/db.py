@@ -146,6 +146,12 @@ CREATE TABLE IF NOT EXISTS observations (
     synced_at   TEXT                              -- für den späteren Abgleich mit Baserow
 );
 
+-- In Beetwerk gelöschte Zeilen, die beim nächsten Abgleich auch in Baserow verschwinden
+CREATE TABLE IF NOT EXISTS baserow_deleted (
+    kind   TEXT    NOT NULL,                      -- traits | plants | observations
+    row_id INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS plantings_bed  ON plantings(bed_id);
 CREATE INDEX IF NOT EXISTS plantings_crop ON plantings(crop_id);
 CREATE INDEX IF NOT EXISTS plants_planting ON plants(planting_id);
@@ -212,6 +218,21 @@ MIGRATIONS = {
         ("tmax", "REAL"),
         ("precip", "REAL"),
         ("et0", "REAL"),
+    ],
+    # Abgleich mit Baserow: Zeilen-ID dort und Prüfsumme des zuletzt übertragenen Inhalts
+    "traits": [
+        ("baserow_id", "INTEGER"),
+        ("bw_hash", "TEXT NOT NULL DEFAULT ''"),
+    ],
+    "plants": [
+        ("baserow_id", "INTEGER"),
+        ("bw_hash", "TEXT NOT NULL DEFAULT ''"),
+    ],
+    "observations": [
+        ("baserow_id", "INTEGER"),
+        ("bw_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("baserow_file", "TEXT NOT NULL DEFAULT ''"),   # Dateiname des Fotos in Baserow
+        ("baserow_photo", "TEXT NOT NULL DEFAULT ''"),  # welches eigene Foto dort liegt
     ],
     "crops": [
         ("trait_group", "TEXT NOT NULL DEFAULT ''"),   # Bonitur-Merkmale: '' | tomato | pepper

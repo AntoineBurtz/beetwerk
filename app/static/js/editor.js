@@ -8,6 +8,7 @@ import { toast, confirmDialog, icon } from "./ui.js";
 import { mixEditor } from "./mix.js";
 import { SOILS, soilOf, FROST_OPTIONS, frostSummary } from "./weather.js";
 import { openGeoSetup } from "./geosetup.js";
+import { baserowSection } from "./baserowsetup.js";
 
 export function shell(title, { onSubmit, extraHead } = {}) {
   const dlg = h("dialog");
@@ -685,6 +686,7 @@ export function openSettings() {
     weatherSection,
     field("Anbaupause für die Fruchtfolge (Jahre)", years,
       "Gleiche Pflanzenfamilie an gleicher Stelle innerhalb dieser Zeit wird markiert. 0 schaltet die Prüfung ab."),
+    baserowSection(() => ui.dlg.close()),
     h("fieldset", {},
       h("legend", {}, "Sicherung"),
       h("p", { class: "muted small", style: { margin: 0 } },
