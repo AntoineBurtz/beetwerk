@@ -4,6 +4,7 @@ import { h, plural, isMixed } from "./util.js";
 import { toast, confirmDialog, icon } from "./ui.js";
 import { shell, field } from "./editor.js";
 import { shrinkPhoto } from "./bwidgets.js";
+import { profileForm, cardTraits, SOURCE_LABEL } from "./profileform.js";
 
 let query = "";
 let cropFilter = "";
@@ -12,9 +13,6 @@ const FIELDS = [
   ["species", "Botanische Art", "z. B. Solanum lycopersicum"],
   ["kind", "Typ", "z. B. Fleischtomate"],
   ["seed", "Saatgut", "samenfest oder F1-Hybride"],
-  ["growth", "Wuchs", "z. B. indeterminiert (Stabtomate)"],
-  ["color", "Fruchtfarbe", ""],
-  ["maturity", "Reife", "z. B. mittelfrüh, etwa 70 Tage"],
   ["supplier", "Bezugsquelle", "Händler oder Herkunft"],
   ["bought", "Gekauft", "z. B. 2026"],
 ];
@@ -31,6 +29,92 @@ async function researchStatus() {
   return researchState;
 }
 export function forgetResearchStatus() { researchState = null; }
+
+// Merkmale je Sorte für die Karten (Bonitur, Internet, eigene Angabe)
+let summaries = null;
+let summariesLoading = false;
+export function forgetProfiles() { summaries = null; }
+function loadSummaries(rerender) {
+  if (summaries || summariesLoading) return;
+  summariesLoading = true;
+  api.get("/api/varieties/profiles")
+    .then((res) => { summaries = res; rerender(); })
+    .catch(() => { summaries = {}; })
+    .finally(() => { summariesLoading = false; });
+}
+
+function hasProfile(v) {
+  return Object.keys(v.profile || {}).length > 0;
+}
+
+// ---------------------------------------------------------------- Mehrere Sorten recherchieren
+
+let batch = null; // Stand von /api/research/batch
+let batchSeen = false;
+let batchNote = null; // Ergebnis des letzten Laufs, bis es weggeklickt wird
+let batchTimer = null;
+let lastRerender = null;
+
+async function pollBatch() {
+  clearTimeout(batchTimer);
+  const wasRunning = batch?.running;
+  try { batch = await api.get("/api/research/batch"); } catch { batch = null; return; }
+  if (batch.running) batchTimer = setTimeout(pollBatch, 2500);
+  else if (wasRunning) {
+    try {
+      state.varieties = await api.get("/api/varieties");
+    } catch { /* bleibt beim alten Stand */ }
+    forgetProfiles();
+    batchNote = batch;
+    const ok = batch.done - batch.skipped.length - batch.failed.length;
+    toast(batch.stopped ? "Recherche abgebrochen" : `${plural(Math.max(ok, 0), "Sorte", "Sorten")} ergänzt`, { error: !!batch.stopped });
+  }
+  lastRerender?.();
+}
+
+async function startBatch(ids) {
+  const st = await researchStatus();
+  if (!st.configured) {
+    const ok = await confirmDialog("Für die Recherche braucht Beetwerk einen API-Schlüssel von Claude. Den trägst du in den Einstellungen unter „KI-Recherche“ ein.",
+      { ok: "Zu den Einstellungen", danger: false, title: "API-Schlüssel fehlt" });
+    if (ok) document.getElementById("settings-btn")?.click();
+    return;
+  }
+  const ok = await confirmDialog(
+    `Claude sucht für ${plural(ids.length, "Sorte", "Sorten")} ohne Merkmale nacheinander im Netz und füllt leere Angaben: `
+    + "Merkmale, Art, Typ, Saatgut, Beschreibung und Quellen. Was schon eingetragen ist, bleibt. "
+    + "Sorten, die Claude nicht sicher findet, bleiben leer. Bilder wählst du danach bei jeder Sorte selbst. "
+    + "Das dauert etwa eine halbe Minute je Sorte und kostet je Sorte einige Cent API-Guthaben.",
+    { ok: "Recherchieren", danger: false, title: "Merkmale recherchieren?" });
+  if (!ok) return;
+  try {
+    batch = await api.post("/api/research/batch", { ids });
+    batchNote = null;
+    lastRerender?.();
+    batchTimer = setTimeout(pollBatch, 2000);
+  } catch (e) { toast(e.message, { error: true }); }
+}
+
+function batchBox() {
+  if (batch?.running) {
+    return h("div", { class: "research-batch", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }),
+      h("span", {}, `Claude recherchiert Merkmale${batch.current ? `: ${batch.current}` : " …"} `,
+        h("span", { class: "muted" }, `(${Math.min(batch.done + 1, batch.total)} von ${batch.total})`)));
+  }
+  if (!batchNote) return null;
+  const b = batchNote;
+  const u = b.usage || {};
+  const ok = Math.max(b.done - b.skipped.length - b.failed.length, 0);
+  return h("div", { class: `research-batch done${b.stopped ? " bad" : ""}`, role: "status" },
+    h("div", {},
+      h("strong", {}, b.stopped ? "Recherche abgebrochen. " : "Recherche fertig. "),
+      `${plural(ok, "Sorte", "Sorten")} ergänzt, ${plural(b.filled, "Angabe", "Angaben")} eingetragen. `,
+      b.skipped.length ? `Nicht sicher gefunden: ${b.skipped.slice(0, 6).join(", ")}${b.skipped.length > 6 ? ` und ${b.skipped.length - 6} weitere` : ""}`
+        + " – öffne sie und nutze „Mit Claude ergänzen“ mit einem Hinweis, z. B. dem Händler. " : "",
+      b.stopped ? b.stopped + " " : b.failed.length ? `Fehler bei ${b.failed.map((f) => f.name).join(", ")}: ${b.failed[0].error} ` : "",
+      h("span", { class: "muted small" }, `${plural(u.web_search_requests || 0, "Suche", "Suchen")} · ${fmtTokens((u.input_tokens || 0) + (u.output_tokens || 0))} Tokens`)),
+    h("button", { type: "button", class: "icon-btn", "aria-label": "Hinweis schließen", onclick: () => { batchNote = null; lastRerender?.(); } }, icon("close")));
+}
 
 // Wie oft eine Sorte in Sätzen vorkommt (gleiche Kultur, gleicher Name)
 function usage() {
@@ -58,11 +142,17 @@ function thumb(v, crop) {
 // ---------------------------------------------------------------- Liste
 
 export function varietiesView(rerender) {
+  lastRerender = rerender;
+  loadSummaries(rerender);
+  if (!batchSeen) { batchSeen = true; pollBatch(); }
   const uses = usage();
   const q = query.trim().toLowerCase();
+  const traitText = (v) => (summaries?.[v.id] || []).map((x) => x.text);
   const list = state.varieties
     .filter((v) => !cropFilter || String(v.crop_id) === cropFilter)
-    .filter((v) => !q || [v.name, v.kind, v.species, v.supplier, v.color, find.crop(v.crop_id)?.name].some((x) => (x || "").toLowerCase().includes(q)));
+    .filter((v) => !q || [v.name, v.kind, v.species, v.supplier, find.crop(v.crop_id)?.name, ...traitText(v)]
+      .some((x) => (x || "").toLowerCase().includes(q)));
+  const bare = state.varieties.filter((v) => !hasProfile(v)).map((v) => v.id);
   const crops = [...new Set(state.varieties.map((v) => v.crop_id))].map((id) => find.crop(id)).filter(Boolean)
     .sort((a, b) => a.name.localeCompare(b.name, "de"));
   const open = missingFromPlantings();
@@ -78,13 +168,18 @@ export function varietiesView(rerender) {
   const cards = list.map((v) => {
     const crop = find.crop(v.crop_id);
     const n = uses.get(`${v.crop_id}|${v.name.trim().toLowerCase()}`) || 0;
+    const sum = summaries?.[v.id] || [];
+    const bonYear = Math.max(0, ...sum.filter((x) => x.source === "bonitur").map((x) => x.year || 0));
+    const traits = cardTraits(sum);
     return h("button", { type: "button", class: "var-card", onclick: () => openVarietyEditor(v, rerender) },
       h("span", { class: "var-thumb" }, thumb(v, crop)),
       h("span", { class: "var-body" },
         h("span", { class: "var-name" }, v.name),
         h("span", { class: "var-meta" }, h("span", { class: "dot", style: { background: crop?.color } }), crop?.name || "ohne Kultur",
           n ? ` · ${plural(n, "Satz", "Sätze")}` : ""),
-        h("span", { class: "var-tags" }, [v.kind, v.seed, v.color].filter(Boolean).map((t) => h("span", { class: "fam" }, t)))));
+        h("span", { class: "var-tags" }, [v.kind, v.seed].filter(Boolean).map((t) => h("span", { class: "fam" }, t)),
+          bonYear ? h("span", { class: "src src-bonitur", title: "Merkmale aus deiner Bonitur" }, `Bonitur ${bonYear}`) : null),
+        traits.length ? h("span", { class: "var-traits" }, traits.map((t) => t.text).join(" · ")) : null));
   });
 
   return h("div", { class: "section" },
@@ -100,8 +195,12 @@ export function varietiesView(rerender) {
           rerender();
         } catch (err) { toast(err.message, { error: true }); }
       } }, `Aus Sätzen übernehmen (${open})`) : null,
+      bare.length && !batch?.running ? h("button", { type: "button", class: "btn",
+        title: "Merkmale, Art, Typ und Beschreibung für Sorten ohne Merkmale aus dem Internet holen",
+        onclick: () => startBatch(bare) }, `Merkmale recherchieren (${bare.length})`) : null,
       h("button", { type: "button", class: "btn", onclick: () => openVarietyEditor(null, rerender) }, icon("plus"), "Neue Sorte"),
       h("button", { type: "button", class: "btn btn-primary", onclick: () => openResearch({ after: rerender }) }, "Neue Samen recherchieren")),
+    batchBox(),
     list.length ? h("div", { class: "var-grid" }, cards)
       : h("div", { class: "empty-note" }, state.varieties.length ? "Keine Sorte passt zum Filter."
         : "Noch keine Sorten. Lege eine an, recherchiere neue Samen mit Claude oder übernimm die Sorten aus deinen Sätzen."));
@@ -145,7 +244,7 @@ function linksEditor(initial) {
 
 export function openVarietyEditor(variety, after, prefill = null) {
   const isNew = !variety?.id;
-  const v = { name: "", crop_id: null, photo: "", photo_credit: "", description: "", notes: "", links: [], ...variety, ...prefill };
+  const v = { name: "", crop_id: null, photo: "", photo_credit: "", description: "", notes: "", links: [], profile: {}, ...variety, ...prefill };
   const name = h("input", { value: v.name, maxlength: 120, required: true });
   const crop = cropSelect(v.crop_id);
   const inputs = Object.fromEntries(FIELDS.map(([k, , ph]) => [k, h("input", { value: v[k] || "", placeholder: ph, maxlength: 200,
@@ -170,10 +269,34 @@ export function openVarietyEditor(variety, after, prefill = null) {
   });
   paintPhoto();
 
+  // Merkmale: Bonitur vor Internet und eigener Angabe; für eine andere Kultur gelten andere Merkmale
+  const prof = profileForm({ values: v.profile });
+  const profNote = h("p", { class: "muted small", style: { margin: 0 } });
+  const paintProfNote = () => {
+    profNote.textContent = prof.count()
+      ? "Werte aus deiner Bonitur gehen vor. Bis es sie gibt, gelten Angaben aus dem Internet oder deine eigenen."
+      : "Noch keine Merkmale. „Mit Claude ergänzen“ holt sie aus dem Internet; nach der Saison stehen hier die Werte deiner Bonitur.";
+  };
+  let profSeq = 0;
+  const loadProfile = async () => {
+    const cropId = crop.value ? Number(crop.value) : null;
+    const seq = ++profSeq;
+    try {
+      const res = v.id && cropId === v.crop_id ? await api.get(`/api/varieties/${v.id}/profile`)
+        : await api.get(`/api/profile-traits${cropId ? `?crop_id=${cropId}` : ""}`);
+      if (seq === profSeq) { prof.setRows(res.rows); paintProfNote(); }
+    } catch (e) {
+      prof.el.replaceChildren(h("p", { class: "form-error", style: { margin: 0 } }, `Merkmale konnten nicht geladen werden: ${e.message}`));
+    }
+  };
+  crop.addEventListener("change", loadProfile);
+  loadProfile();
+
   const collect = () => ({
     name: name.value.trim(), crop_id: crop.value ? Number(crop.value) : null,
     ...Object.fromEntries(FIELDS.map(([k]) => [k, inputs[k].value.trim()])),
     description: description.value, notes: notes.value, photo, photo_credit: credit.value.trim(), links: links.get(),
+    profile: prof.get(),
   });
 
   const ui = shell(isNew ? "Neue Sorte" : v.name, {
@@ -182,6 +305,7 @@ export function openVarietyEditor(variety, after, prefill = null) {
       if (!data.name) throw new Error("Bitte einen Sortennamen eingeben");
       if (isNew) await create("varieties", data);
       else await patch("varieties", v.id, data, { silent: true });
+      forgetProfiles();
       after?.();
     },
   });
@@ -189,6 +313,10 @@ export function openVarietyEditor(variety, after, prefill = null) {
     h("div", { class: "grid-2" }, field("Sorte", name), field("Kultur", crop)),
     h("div", { class: "grid-2" }, FIELDS.map(([k, label]) => field(label, inputs[k]))), seedList,
     field("Beschreibung", description),
+    h("section", { class: "prof-section", "aria-label": "Merkmale" },
+      h("div", { class: "prof-head" }, h("h3", {}, "Merkmale"),
+        h("span", { class: "prof-legend" }, ["bonitur", "internet", "manual"].map((k) => h("span", { class: `src src-${k}` }, SOURCE_LABEL[k])))),
+      profNote, prof.el),
     h("div", { class: "field" }, h("span", {}, "Foto"), photoBox, fileIn),
     field("Bildquelle", credit, "Woher das Bild stammt und unter welcher Lizenz"),
     h("div", { class: "field" }, h("span", {}, "Quellen"), links.el),
@@ -200,7 +328,9 @@ export function openVarietyEditor(variety, after, prefill = null) {
       try { await remove("varieties", v.id); after?.(); toast(`${v.name} gelöscht`); } catch { /* Meldung kam schon */ }
     } }, "Löschen"),
     h("button", { type: "button", class: "btn", onclick: () => {
-      const data = collect();
+      let data;
+      try { data = collect(); } catch (e) { ui.showError(e.message); return; }
+      if (!data.profile) delete data.profile;
       if (!data.name) { ui.showError("Für die Recherche zuerst den Sortennamen eintragen"); return; }
       ui.dlg.close();
       openResearch({ base: { ...v, ...data }, after });
@@ -338,7 +468,13 @@ export async function openResearch({ base = null, after } = {}) {
       h("a", { href: s.url, target: "_blank", rel: "noopener" }, s.title || s.url))));
     const u = result.usage || {};
     const conf = result.confidence ? h("span", { class: `conf conf-${result.confidence}` }, `Treffer: ${result.confidence}`) : null;
-    form = { nameIn, cropIn, inputs, desc, imgs, get chosen() { return chosen; }, keep, unknownCrop };
+    // Merkmale: vorhandene Angaben bleiben, neue aus der Recherche sind grün hinterlegt
+    const meta = result.trait_meta || [];
+    const had = base?.profile || {};
+    const values = Object.fromEntries(meta.map((m) => [m.key, had[m.key] || { value: result.traits[m.key], source: "internet" }]));
+    const prof = meta.length ? profileForm({ rows: meta.map((m) => ({ ...m, bonitur: null })), values, compact: true,
+      highlight: new Set(meta.map((m) => m.key).filter((k) => !had[k])) }) : null;
+    form = { nameIn, cropIn, inputs, desc, imgs, get chosen() { return chosen; }, keep, unknownCrop, prof, meta };
     fill(stage, 
       h("div", { class: "research-meta" }, conf,
         h("span", { class: "muted small" }, `${plural(u.web_search_requests || 0, "Suche", "Suchen")} · ${fmtTokens((u.input_tokens || 0) + (u.output_tokens || 0))} Tokens · ${result.model}`)),
@@ -346,6 +482,9 @@ export async function openResearch({ base = null, after } = {}) {
       h("div", { class: "grid-2" }, field("Sorte", nameIn), field("Kultur", cropIn)),
       h("div", { class: "grid-2" }, FIELDS.map(([k, label]) => field(label, inputs[k]))),
       field("Beschreibung", desc),
+      h("div", { class: "field" }, h("span", {}, "Merkmale"),
+        prof ? prof.el : h("span", { class: "muted small" }, "Claude hat keine belegten Merkmale gefunden."),
+        prof ? h("span", { class: "hint" }, "Klasse und Zahl stehen getrennt. Werte aus deiner Bonitur gehen später vor.") : null),
       h("div", { class: "field" }, h("span", {}, "Bild"), imgGrid,
         h("span", { class: "hint" }, "Shopfotos sind urheberrechtlich geschützt: gut für die eigene Sortenliste, nicht zum Veröffentlichen.")),
       result.sources.length ? h("div", { class: "field" }, h("span", {}, "Quellen"), srcList) : null);
@@ -363,6 +502,12 @@ export async function openResearch({ base = null, after } = {}) {
       ...Object.fromEntries(FIELDS.map(([k]) => [k, f.inputs[k].value.trim()])),
     };
     if (!data.name) throw new Error("Bitte einen Sortennamen eingeben");
+    const same = base?.id ? find.variety(base.id)
+      : state.varieties.find((v) => v.crop_id === cropId && v.name.trim().toLowerCase() === data.name.toLowerCase());
+    const found = f.prof ? f.prof.get() : {};
+    const merged = { ...(base?.profile || same?.profile || {}) };
+    for (const m of f.meta) delete merged[m.key];
+    data.profile = { ...merged, ...found };
     const im = f.chosen >= 0 ? f.imgs[f.chosen] : null;
     if (im && !im.keep) {
       go.disabled = true;
@@ -382,8 +527,6 @@ export async function openResearch({ base = null, after } = {}) {
     }
     const old = new Set((base?.links || []).map((l) => l.url));
     data.links = [...(base?.links || []), ...result.sources.filter((s, i) => f.keep.has(i) && !old.has(s.url))].slice(0, 20);
-    const same = base?.id ? find.variety(base.id)
-      : state.varieties.find((v) => v.crop_id === cropId && v.name.trim().toLowerCase() === data.name.toLowerCase());
     if (same) {
       await patch("varieties", same.id, data, { silent: true });
       toast(`${data.name} aktualisiert`);
@@ -391,6 +534,7 @@ export async function openResearch({ base = null, after } = {}) {
       await create("varieties", data);
       toast(`${data.name} in die Sortenliste übernommen`);
     }
+    forgetProfiles();
     after?.();
   }
 

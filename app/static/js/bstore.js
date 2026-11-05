@@ -148,8 +148,16 @@ export function appliesTo(t, group, level) {
   return true;
 }
 
+const SECTION_ORDER = Object.keys(SECTION_LABEL);
+
+// Nach Abschnitt geordnet, damit Merkmale für alle Kulturen bei denen der Kultur stehen
+export function bySection(list) {
+  const at = (t) => { const i = SECTION_ORDER.indexOf(t.section); return i < 0 ? 99 : i; };
+  return list.sort((a, b) => at(a) - at(b) || a.sort - b.sort || a.id - b.id);
+}
+
 export function traitsFor(group, level) {
-  return bon.traits.filter((t) => appliesTo(t, group, level));
+  return bySection(bon.traits.filter((t) => appliesTo(t, group, level)));
 }
 
 // Ist der Zeitpunkt des Merkmals bei diesem Stadium gekommen?

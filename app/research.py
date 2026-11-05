@@ -35,11 +35,19 @@ MODELS = [
     ("claude-opus-5-5", "Claude Opus 5.5 – am gründlichsten, teurer"),
 ]
 DEFAULT_MODEL = MODELS[0][0]
-FIELDS = ("name", "crop", "species", "kind", "seed", "growth", "color", "maturity", "supplier", "description")
+FIELDS = ("name", "crop", "species", "kind", "seed", "supplier", "description")
 
 
 class ResearchError(Exception):
     pass
+
+
+class FatalResearchError(ResearchError):
+    """Fehler, bei dem weitere Anfragen nichts bringen (Schlüssel, Guthaben, keine Verbindung)."""
+
+
+class BusyError(ResearchError):
+    """Zu viele Anfragen oder überlastet: später noch einmal."""
 
 
 # ---------------------------------------------------------------- Einstellungen
@@ -88,18 +96,18 @@ def _claude(body: dict, api_key: str) -> dict:
             err = {}
         kind, msg = err.get("type", ""), err.get("message", "") or exc.reason
         if exc.code == 401 or kind == "authentication_error":
-            raise ResearchError("Der API-Schlüssel wird nicht angenommen. Prüfe ihn in den Einstellungen.") from exc
+            raise FatalResearchError("Der API-Schlüssel wird nicht angenommen. Prüfe ihn in den Einstellungen.") from exc
         if exc.code == 403 or kind == "permission_error":
-            raise ResearchError(f"Der API-Schlüssel darf das nicht: {msg}") from exc
+            raise FatalResearchError(f"Der API-Schlüssel darf das nicht: {msg}") from exc
         if exc.code == 429 or kind == "rate_limit_error":
-            raise ResearchError("Zu viele Anfragen an Claude. Bitte in einer Minute noch einmal.") from exc
+            raise BusyError("Zu viele Anfragen an Claude. Bitte in einer Minute noch einmal.") from exc
         if exc.code in (500, 529) or kind in ("overloaded_error", "api_error"):
-            raise ResearchError("Claude ist gerade überlastet. Bitte gleich noch einmal versuchen.") from exc
+            raise BusyError("Claude ist gerade überlastet. Bitte gleich noch einmal versuchen.") from exc
         if "credit balance" in str(msg).lower():
-            raise ResearchError("Das Guthaben des API-Kontos reicht nicht. Lade es in der Claude Console auf.") from exc
+            raise FatalResearchError("Das Guthaben des API-Kontos reicht nicht. Lade es in der Claude Console auf.") from exc
         raise ResearchError(f"Claude meldet: {msg}") from exc
     except urllib.error.URLError as exc:
-        raise ResearchError(f"Claude ist nicht erreichbar ({exc.reason}). Hat der Server Internet?") from exc
+        raise FatalResearchError(f"Claude ist nicht erreichbar ({exc.reason}). Hat der Server Internet?") from exc
     except (TimeoutError, OSError) as exc:
         raise ResearchError(f"Claude antwortet nicht ({exc})") from exc
 
@@ -122,7 +130,22 @@ SYSTEM = (
 )
 
 
-def _prompt(name: str, crop: str, crops: list[str], hint: str, with_image: bool) -> str:
+def _trait_lines(traits: list[dict]) -> str:
+    """Merkmale der Sortenliste, die Claude füllen soll, mit erlaubten Werten."""
+    lines = []
+    for t in traits:
+        if t["type"] == "number":
+            what = f"Zahl in {t['unit']}" if t.get("unit") else "Zahl"
+        elif t["type"] == "multi":
+            what = "Liste aus: " + " | ".join(t["options"] or [])
+        else:
+            what = "genau eines von: " + " | ".join(t["options"] or [])
+        group = {"tomato": " (nur Tomate)", "pepper": " (nur Paprika/Chili)"}.get(t.get("grp"), "")
+        lines.append(f"- {t['key']}: {t['name']}{group} – {what}")
+    return "\n".join(lines)
+
+
+def _prompt(name: str, crop: str, crops: list[str], hint: str, with_image: bool, traits: list[dict]) -> str:
     parts = []
     if name:
         parts.append(f"Recherchiere die Gemüsesorte „{name}“" + (f" (Kultur: {crop})" if crop else "") + ".")
@@ -139,16 +162,21 @@ def _prompt(name: str, crop: str, crops: list[str], hint: str, with_image: bool)
         "species: botanische Art, z. B. Solanum lycopersicum oder Capsicum chinense\n"
         "kind: Typ, z. B. Fleischtomate, Cocktailtomate, Spitzpaprika, Habanero-Typ\n"
         "seed: „samenfest“, „F1-Hybride“ oder leer\n"
-        "growth: Wuchs, z. B. „indeterminiert (Stabtomate)“, „determiniert (Buschtomate)“, „kompakt“\n"
-        "color: Fruchtfarbe bei Reife\n"
-        "maturity: Reife, z. B. „mittelfrüh, etwa 70 Tage nach Pflanzung“\n"
         "supplier: Händler oder Bezugsquelle, nur wenn vom Tütchen oder Hinweis bekannt\n"
         "description: zwei bis vier Sätze zu Frucht, Geschmack, Verwendung, Herkunft\n"
         "confidence: „hoch“, „mittel“ oder „niedrig“, je nachdem wie sicher genau diese Sorte gefunden wurde\n"
         "sources: die wichtigsten Seiten als Liste [{\"url\": …, \"title\": …}], höchstens fünf\n"
         "images: direkte Bild-URLs genau dieser Sorte von diesen Seiten, höchstens vier, sonst leere Liste\n"
+        "traits: Merkmale als Objekt {Schlüssel: Wert}, nur mit den Schlüsseln aus der Liste unten und nur, "
+        "wenn eine Quelle sie belegt\n"
         "Unbekannte Werte als leerer Text."
     )
+    if traits:
+        parts.append(
+            "Merkmale für traits. Klassen und Zahlen sind getrennte Felder: schreibe in ein Klassen-Feld nur die "
+            "Klasse (z. B. plant_size „groß“) und in das Zahlen-Feld nur die Zahl ohne Einheit (z. B. height 180). "
+            "Bei Spannen wie „150–200 cm“ die Mitte (175). Rechne Einheiten um, wenn nötig (1 m = 100 cm). "
+            "Lass ein Merkmal weg, wenn du es nicht belegen kannst.\n" + _trait_lines(traits))
     return "\n\n".join(parts)
 
 
@@ -166,11 +194,11 @@ def _parse_json(text: str) -> dict:
 
 
 def research(name: str, crop: str = "", crops: Optional[list[str]] = None, hint: str = "",
-             image: Optional[dict] = None) -> dict:
+             image: Optional[dict] = None, traits: Optional[list[dict]] = None, images: bool = True) -> dict:
     """Recherchiert eine Sorte. image: {"data": base64, "media_type": "image/jpeg"} (Samentütchen)."""
     s = settings()
     if not s["api_key"]:
-        raise ResearchError("Für die Recherche fehlt der API-Schlüssel (Einstellungen → KI-Recherche)")
+        raise FatalResearchError("Für die Recherche fehlt der API-Schlüssel (Einstellungen → KI-Recherche)")
     name = (name or "").strip()
     if not name and not image:
         raise ResearchError("Bitte einen Sortennamen eingeben oder ein Foto vom Samentütchen wählen")
@@ -178,10 +206,10 @@ def research(name: str, crop: str = "", crops: Optional[list[str]] = None, hint:
     if image:
         content.append({"type": "image", "source": {"type": "base64", "media_type": image.get("media_type", "image/jpeg"),
                                                     "data": image["data"]}})
-    content.append({"type": "text", "text": _prompt(name, crop, crops or [], hint.strip(), bool(image))})
+    content.append({"type": "text", "text": _prompt(name, crop, crops or [], hint.strip(), bool(image), traits or [])})
     messages = [{"role": "user", "content": content}]
     body = {
-        "model": s["model"], "max_tokens": 3000, "system": SYSTEM, "messages": messages,
+        "model": s["model"], "max_tokens": 4000, "system": SYSTEM, "messages": messages,
         "tools": [
             {"type": "web_search_20250305", "name": "web_search", "max_uses": 5,
              "user_location": {"type": "approximate", "country": "DE", "timezone": "Europe/Berlin"}},
@@ -213,13 +241,15 @@ def research(name: str, crop: str = "", crops: Optional[list[str]] = None, hint:
             found += [{"url": r.get("url"), "title": r.get("title", "")} for r in b["content"] if r.get("url")]
     out = {k: str(data.get(k) or "").strip() for k in FIELDS}
     out["confidence"] = str(data.get("confidence") or "").strip()
+    out["traits"] = data.get("traits") if isinstance(data.get("traits"), dict) else {}
     sources = [x for x in (data.get("sources") or []) if isinstance(x, dict) and _http(x.get("url"))]
     if not sources:
         sources = found[:5]
     out["sources"] = [{"url": x["url"], "title": str(x.get("title") or "")[:200]} for x in sources[:5]]
     model_images = [u for u in (data.get("images") or []) if isinstance(u, str) and _http(u)][:4]
     out["images"] = image_candidates(out["name"] or name, out["species"], out["crop"] or crop,
-                                     [x["url"] for x in out["sources"]] + [x["url"] for x in found[:3]], model_images)
+                                     [x["url"] for x in out["sources"]] + [x["url"] for x in found[:3]],
+                                     model_images) if images else []
     out["usage"] = usage
     out["model"] = s["model"]
     return out

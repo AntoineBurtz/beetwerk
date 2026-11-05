@@ -83,6 +83,10 @@ export function baserowSection(closeSettings) {
         st.missing?.length ? h("p", { class: "small warn-note", style: { margin: 0 } },
           `Neu: Beetwerk kann auch ${st.missing.map((n) => `„${n}“`).join(", ")} nach Baserow schreiben. `
           + "Mit „Neu einrichten“ legt es die Tabellen an; vorhandene Tabellen und Werte bleiben.") : null,
+        Object.keys(st.missing_fields || {}).length ? h("p", { class: "small warn-note", style: { margin: 0 } },
+          "In Baserow fehlen Spalten, die Beetwerk füllen kann: ",
+          Object.entries(st.missing_fields).map(([t, cols]) => `${t}: ${cols.join(", ")}`).join("; "),
+          ". Mit „Neu einrichten“ kommen sie dazu; vorhandene Spalten und Werte bleiben.") : null,
         h("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap" } },
           h("button", { type: "button", class: "btn", onclick: async (e) => {
             e.currentTarget.disabled = true;

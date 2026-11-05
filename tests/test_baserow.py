@@ -224,6 +224,10 @@ def test_varieties_crops_and_plantings(client, fake):
     v = client.post("/api/varieties", json={"crop_id": tomate["id"], "name": "Ochsenherz", "species": "Solanum lycopersicum",
                                             "kind": "Fleischtomate", "seed": "samenfest", "photo": photo,
                                             "photo_credit": "eigenes Foto",
+                                            "profile": {"fruit_size": {"value": "sehr groß", "source": "internet"},
+                                                        "tom_fruit_weight": {"value": "250 g", "source": "internet"},
+                                                        "tom_growth": {"value": "indeterminiert", "source": "manual"},
+                                                        "days_to_maturity": {"value": 80, "source": "internet"}},
                                             "links": [{"url": "https://example.org/ochsenherz", "title": "Shop"}]})
     assert v.status_code == 201, v.text
     dup = client.post("/api/varieties", json={"crop_id": tomate["id"], "name": "ochsenherz"})
@@ -240,12 +244,35 @@ def test_varieties_crops_and_plantings(client, fake):
     sort_rows = {r["Sorte"]: r for r in sorts_t["rows"].values() if r["Kultur"] == [crop_rows[tomate["id"]]["id"]]}
     oh = sort_rows["Ochsenherz"]
     assert oh["Typ"] == "Fleischtomate" and oh["Foto"][0]["name"] in store.files and "example.org" in oh["Quellen"]
+    # Merkmale: Klasse und Zahl in eigenen Spalten, alle zusammen mit Herkunft
+    rows = {r["key"]: r for r in client.get(f"/api/varieties/{v.json()['id']}/profile").json()["rows"]}
+    assert oh["Fruchtgröße"] == "sehr groß" and oh["Tage bis Reife"] == 80 and oh["Schärfe (SHU)"] is None
+    assert oh["Wuchs"] == "indeterminiert" and "Wuchstyp: indeterminiert (eigene Angabe)" in oh["Merkmale"]
+    # Fruchtgewicht aus der Ernte der Bonitur schlägt die Recherche
+    fw = rows["tom_fruit_weight"]
+    assert fw["source"] == "bonitur" and fw["stored"]["value"] == 250 and oh["Fruchtgewicht (g)"] == round(fw["value"], 1)
+    assert f"Fruchtgewicht: {fw['text']} (Bonitur 2026" in oh["Merkmale"]
+    assert "Fruchtgröße: sehr groß (Internet)" in oh["Merkmale"]
     mixed = next(p for p in data["plantings"] if p["varieties"] and p["sow_date"] == "2026-03-10")
     set_row = next(r for r in sets_t["rows"].values() if r["Beetwerk-ID"] == mixed["id"])
     assert set_row["Pflanzen"] == 15 and set_row["Aussaat"] == "2026-03-10" and set_row["Kultur"] == [crop_rows[tomate["id"]]["id"]]
     assert oh["id"] in set_row["Sorten"] and len(set_row["Sorten"]) == 5
     plant_rows = [r for r in _table(store, "Bonitur-Pflanzen")["rows"].values() if r["Sorte"] == "Ochsenherz"]
     assert plant_rows and all(r["Beetwerk-Sorte"] == [oh["id"]] for r in plant_rows)
+
+    # Eine Spalte fehlt (z. B. gelöscht oder älteres Einrichten): der Abgleich läuft weiter und meldet sie
+    shu = next(f for f in sorts_t["fields"] if f["name"] == "Schärfe (SHU)")
+    sorts_t["fields"].remove(shu)
+    for row in sorts_t["rows"].values():
+        row.pop("Schärfe (SHU)", None)
+    client.patch(f"/api/varieties/{v.json()['id']}", json={"profile": {"fruit_size": {"value": "groß", "source": "manual"}}})
+    res = client.post("/api/baserow/sync").json()
+    assert res["last_error"] is None, res
+    assert res["missing_fields"] == {"Beetwerk-Sorten": ["Schärfe (SHU)"]}
+    assert oh["Fruchtgröße"] == "groß" and oh["Tage bis Reife"] is None and "Schärfe (SHU)" not in oh
+    sorts_t["fields"].append(shu)
+    res = client.post("/api/baserow/sync").json()
+    assert res["missing_fields"] == {}
 
     # Löschen einer Sorte löscht die Zeile in Baserow
     gz = next(x for x in collected if x["name"] == "Green Zebra")
