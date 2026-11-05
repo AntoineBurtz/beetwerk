@@ -24,7 +24,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from . import bonitur, db
+from . import bonitur, db, profile
 
 USER_AGENT = "Beetwerk (selbst gehostete Anbauplanung)"
 TIMEOUT = 30
@@ -46,6 +46,7 @@ BOOL = {"type": "boolean"}
 FILE = {"type": "file"}
 
 DECIMAL2 = {"type": "number", "number_decimal_places": 2, "number_negative": False}
+NUM1 = {"type": "number", "number_decimal_places": 1, "number_negative": False}
 
 TABLES = {
     "crops": {
@@ -65,6 +66,9 @@ TABLES = {
             ("Saatgut", TEXT), ("Wuchs", TEXT), ("Fruchtfarbe", TEXT), ("Reife", TEXT), ("Bezugsquelle", TEXT),
             ("Gekauft", TEXT), ("Beschreibung", LONG), ("Foto", FILE), ("Bildquelle", TEXT), ("Quellen", LONG),
             ("Notizen", LONG), ("Beetwerk-ID", INT),
+            # Merkmale: Klasse und Zahl getrennt; „Merkmale“ führt alle mit Herkunft auf
+            ("Pflanzengröße", TEXT), ("Pflanzenhöhe (cm)", NUM1), ("Fruchtgröße", TEXT), ("Fruchtgewicht (g)", NUM1),
+            ("Tage bis Reife", INT), ("Schärfe (SHU)", INT), ("Merkmale", LONG),
         ],
     },
     "plantings": {
@@ -295,6 +299,7 @@ def status() -> dict:
         "last_sync": state.get("last_sync"),
         "last_error": state.get("last_error"),
         "last_result": state.get("last_result"),
+        "missing_fields": state.get("missing_fields") or {},
         "running": _lock.locked(),
         "spec": spec(),
     }
@@ -649,13 +654,37 @@ def _links_text(raw) -> str:
                      for x in links if isinstance(x, dict))
 
 
-def variety_payload(v: dict, crop_bid: Optional[int]) -> dict:
+def variety_payload(v: dict, crop_bid: Optional[int], rows: list[dict]) -> dict:
+    """rows: Sortenprofil (profile.rows_for); Bonitur geht vor Recherche und eigener Angabe."""
+    by = {r["key"]: r for r in rows if r["text"]}
+
+    def text(*keys):
+        return next((by[k]["text"] for k in keys if k in by), "")
+
+    def number(*keys, digits=1):
+        for k in keys:
+            if k in by and isinstance(by[k]["value"], (int, float)):
+                return round(float(by[k]["value"]), digits) if digits else int(round(by[k]["value"]))
+        return None
+
+    lines = []
+    for r in rows:
+        if not r["text"]:
+            continue
+        b = r.get("bonitur")
+        origin = f"Bonitur {b['year']}" + (f", n={b['n']}" if b.get("n", 1) > 1 else "") if b else \
+            ("Internet" if r["source"] == "internet" else "eigene Angabe")
+        lines.append(f"{r['name']}: {r['text']} ({origin})")
     return {
         "Sorte": v["name"], "Kultur": [crop_bid] if crop_bid else [], "Botanische Art": v["species"], "Typ": v["kind"],
-        "Saatgut": v["seed"], "Wuchs": v["growth"], "Fruchtfarbe": v["color"], "Reife": v["maturity"],
-        "Bezugsquelle": v["supplier"], "Gekauft": v["bought"], "Beschreibung": v["description"],
-        "Bildquelle": v["photo_credit"], "Quellen": _links_text(v["links"]), "Notizen": v["notes"],
-        "Beetwerk-ID": v["id"],
+        "Saatgut": v["seed"], "Wuchs": text("tom_growth", "pep_habit"), "Fruchtfarbe": text("tom_fruit_color", "pep_fruit_color"),
+        "Reife": text("maturity_class"), "Bezugsquelle": v["supplier"], "Gekauft": v["bought"],
+        "Beschreibung": v["description"], "Bildquelle": v["photo_credit"], "Quellen": _links_text(v["links"]),
+        "Notizen": v["notes"], "Beetwerk-ID": v["id"],
+        "Pflanzengröße": text("plant_size"), "Pflanzenhöhe (cm)": number("height"), "Fruchtgröße": text("fruit_size"),
+        "Fruchtgewicht (g)": number("tom_fruit_weight", "pep_fruit_weight"),
+        "Tage bis Reife": number("days_to_maturity", digits=0), "Schärfe (SHU)": number("pep_scoville", digits=0),
+        "Merkmale": "\n".join(lines),
     }
 
 
@@ -793,7 +822,7 @@ def sync() -> dict:
         except BaserowError as exc:
             _save_state(last_error=str(exc), last_try=_now(), last_result=result)
             raise
-        _save_state(last_sync=_now(), last_error=None, last_result=result)
+        _save_state(last_sync=_now(), last_error=None, last_result=result, missing_fields=result.pop("_missing", {}))
         return result
     finally:
         _lock.release()
@@ -827,6 +856,25 @@ def _run(client: Client, cfg: dict, result: dict) -> None:
     _adopt(client, cfg)
     tables = cfg["tables"]
     links = cfg.get("links") or {}
+    present: dict[str, set] = {}
+    missing: dict[str, list] = {}
+
+    def keep(kind: str, payload: dict) -> dict:
+        """Felder weglassen, die es in Baserow (noch) nicht gibt, z. B. nach einem Update von Beetwerk."""
+        if kind not in present:
+            present[kind] = {f["name"] for f in client.fields(tables[kind])}
+        gone = [k for k in payload if k not in present[kind]]
+        if gone:
+            name = TABLES[kind]["name"]
+            missing[name] = sorted(set(missing.get(name, [])) | set(gone))
+        return {k: v for k, v in payload.items() if k in present[kind]}
+
+    with db.session() as conn:
+        bon = profile.bonitur_profiles(conn)
+        groups = {c["id"]: c["trait_group"] or "" for c in db.rows(conn, "SELECT id, trait_group FROM crops")}
+        ptraits = {g: profile.profile_traits(conn, g) for g in set(groups.values()) | {""}}
+        vrows = {v["id"]: profile.rows_for(conn, v, bon.get(v["id"], {}), ptraits[groups.get(v["crop_id"], "")])
+                 for v in db.rows(conn, "SELECT * FROM varieties")}
     with db.session() as conn:
         crops = db.rows(conn, "SELECT * FROM crops ORDER BY name")
         varieties = db.rows(conn, "SELECT * FROM varieties ORDER BY name")
@@ -845,7 +893,7 @@ def _run(client: Client, cfg: dict, result: dict) -> None:
     if tables.get("crops"):
         items = []
         for c in crops:
-            payload = crop_payload(c)
+            payload = keep("crops", crop_payload(c))
             h = _hash(payload)
             if not c["baserow_id"] or c["bw_hash"] != h:
                 items.append((c, payload, h))
@@ -855,12 +903,13 @@ def _run(client: Client, cfg: dict, result: dict) -> None:
     if tables.get("varieties"):
         items = []
         for v in varieties:
-            payload = variety_payload(v, crop_bid.get(v["crop_id"]))
+            payload = keep("varieties", variety_payload(v, crop_bid.get(v["crop_id"]), vrows.get(v["id"], [])))
             h = _hash(payload, extra=v["photo"])
             if v["baserow_id"] and v["bw_hash"] == h and v["photo"] == v["baserow_photo"]:
                 continue
-            _upload_photo(client, "varieties", v, f"sorte-{v['id']}.jpg", result)
-            payload["Foto"] = [{"name": v["baserow_file"]}] if v["photo"] and v["baserow_file"] else []
+            if "Foto" in present["varieties"]:
+                _upload_photo(client, "varieties", v, f"sorte-{v['id']}.jpg", result)
+                payload["Foto"] = [{"name": v["baserow_file"]}] if v["photo"] and v["baserow_file"] else []
             items.append((v, payload, h))
         _write(client, tables["varieties"], "varieties", items, result, extra_cols=_photo_cols)
     if tables.get("plantings"):
@@ -874,8 +923,8 @@ def _run(client: Client, cfg: dict, result: dict) -> None:
             vbids = [variety_key[(pt["crop_id"], n.strip().lower())]["baserow_id"] for n in names
                      if (pt["crop_id"], n.strip().lower()) in variety_key
                      and variety_key[(pt["crop_id"], n.strip().lower())]["baserow_id"]]
-            payload = planting_payload(pt, crop, beds.get(pt["bed_id"]), crop_bid.get(pt["crop_id"]),
-                                       list(dict.fromkeys(vbids)))
+            payload = keep("plantings", planting_payload(pt, crop, beds.get(pt["bed_id"]), crop_bid.get(pt["crop_id"]),
+                                                         list(dict.fromkeys(vbids))))
             h = _hash(payload)
             if not pt["baserow_id"] or pt["bw_hash"] != h:
                 items.append((pt, payload, h))
@@ -884,7 +933,7 @@ def _run(client: Client, cfg: dict, result: dict) -> None:
     # 1. Merkmale
     items = []
     for t in traits:
-        payload = trait_payload(t)
+        payload = keep("traits", trait_payload(t))
         h = _hash(payload)
         if not t["baserow_id"] or t["bw_hash"] != h:
             items.append((t, payload, h))
@@ -898,7 +947,7 @@ def _run(client: Client, cfg: dict, result: dict) -> None:
             continue
         pinfo = info[pl["planting_id"]]
         sort = variety_key.get((pinfo["crop_id"], (pl["variety"] or "").strip().lower()))
-        payload = plant_payload(pl, pinfo, cfg, lookups, sort["baserow_id"] if sort else None)
+        payload = keep("plants", plant_payload(pl, pinfo, cfg, lookups, sort["baserow_id"] if sort else None))
         h = _hash(payload)
         if not pl["baserow_id"] or pl["bw_hash"] != h:
             items.append((pl, payload, h))
@@ -915,15 +964,18 @@ def _run(client: Client, cfg: dict, result: dict) -> None:
         plant = plant_by_id.get(o["plant_id"]) if o["plant_id"] else None
         if o["plant_id"] and (not plant or not plant.get("baserow_id")):
             continue
-        payload = obs_payload(o, t, plant, plant["baserow_id"] if plant else None, trait_bid[t["id"]],
-                              info[o["planting_id"]], cfg, lookups)
+        payload = keep("observations", obs_payload(o, t, plant, plant["baserow_id"] if plant else None,
+                                                   trait_bid[t["id"]], info[o["planting_id"]], cfg, lookups))
         h = _hash(payload, extra=o["photo"])
         if o["baserow_id"] and o["bw_hash"] == h and o["photo"] == o["baserow_photo"]:
             continue
-        _upload_photo(client, "observations", o, f"bonitur-{o['date']}-{o['id']}.jpg", result)
-        payload["Foto"] = [{"name": o["baserow_file"]}] if o["photo"] and o["baserow_file"] else []
+        if "Foto" in present["observations"]:
+            _upload_photo(client, "observations", o, f"bonitur-{o['date']}-{o['id']}.jpg", result)
+            payload["Foto"] = [{"name": o["baserow_file"]}] if o["photo"] and o["baserow_file"] else []
         items.append((o, payload, h))
     _write(client, tables["observations"], "observations", items, result, extra_cols=_photo_cols)
+
+    result["_missing"] = missing
 
     # 4. In Beetwerk Gelöschtes auch in Baserow löschen (Werte zuerst, Kulturen zuletzt)
     for kind in reversed(ORDER):

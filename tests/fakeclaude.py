@@ -7,7 +7,9 @@ API-Schlüssel: sk-test
 """
 import io
 import json
+import os
 import sys
+import time
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -56,6 +58,7 @@ class Fake(BaseHTTPRequestHandler):
         if body["max_tokens"] == 5:
             return self._send(200, {"model": body["model"], "content": [{"type": "text", "text": "OK"}],
                                     "stop_reason": "end_turn", "usage": {"input_tokens": 10, "output_tokens": 1}})
+        time.sleep(float(os.environ.get("FAKE_CLAUDE_DELAY") or 0))  # für Versuche mit der Oberfläche
         usage = {"input_tokens": 1000, "output_tokens": 200, "server_tool_use": {"web_search_requests": 1}}
         if len(body["messages"]) == 1:  # erste Runde: Websuche, dann Pause
             return self._send(200, {"stop_reason": "pause_turn", "usage": usage, "content": [
@@ -64,11 +67,16 @@ class Fake(BaseHTTPRequestHandler):
                     {"type": "web_search_result", "url": f"{self.base}/shop/ochsenherz", "title": "Ochsenherz – Shop",
                      "encrypted_content": "x"}]}]})
         prompt = json.dumps(body["messages"][0]["content"], ensure_ascii=False)
-        named = "Ochsenherz" if ("Ochsenherz" in prompt or '"type": "image"' in prompt) else "Unbekannte Sorte"
+        named = "Ochsenherz" if ("„Ochsenherz" in prompt or '"type": "image"' in prompt) else "Unbekannte Sorte"
         answer = {"name": named, "crop": "Tomate", "species": "Solanum lycopersicum", "kind": "Fleischtomate",
-                  "seed": "samenfest", "growth": "indeterminiert (Stabtomate)", "color": "rot",
-                  "maturity": "mittelspät", "supplier": "", "description": "Große, herzförmige Früchte.",
-                  "confidence": "hoch", "sources": [{"url": f"{self.base}/shop/ochsenherz", "title": "Shop"}],
+                  "seed": "samenfest", "supplier": "", "description": "Große, herzförmige Früchte.",
+                  # Klassen und Zahlen getrennt, dazu etwas, das nicht passt
+                  "traits": {"plant_size": "groß", "height": "150–200 cm", "tom_growth": "indeterminiert (Stabtomate)",
+                             "fruit_size": "sehr groß", "tom_fruit_weight": "250 g", "tom_fruit_color": "Rot",
+                             "maturity_class": "mittelspät", "days_to_maturity": "75 bis 85 Tage",
+                             "tom_fruit_shape": "herzförmig", "pep_scoville": 50000, "tom_locules": "viele",
+                             "erfunden": "x"},
+                  "confidence": "hoch" if named == "Ochsenherz" else "niedrig", "sources": [{"url": f"{self.base}/shop/ochsenherz", "title": "Shop"}],
                   "images": []}
         return self._send(200, {"stop_reason": "end_turn", "usage": usage, "content": [
             {"type": "text", "text": "Hier das Ergebnis:\n```json\n" + json.dumps(answer, ensure_ascii=False) + "\n```"}]})

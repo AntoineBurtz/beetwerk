@@ -8,7 +8,7 @@ import { toast, confirmDialog, icon, iconBtn } from "./ui.js";
 import { shell, field } from "./editor.js";
 import {
   bon, onBon, loadBonitur, bbchImages, plantsOf, plantById, traitByKey, traitById, values, latest, onDate,
-  bbchOf, firstReached, median, appliesTo, traitsFor, inWindow, fmtValue, sameValue, plantTarget, varietyTarget,
+  bbchOf, firstReached, median, appliesTo, traitsFor, bySection, inWindow, fmtValue, sameValue, plantTarget, varietyTarget,
   obsOfPlanting, obsOfPlant, fixPlants, addPlant, patchPlant, deletePlant, setLabels, saveEntries, patchObs,
   deleteObs, undoSaved, uploadPhoto, saveTrait, deleteTrait, saveSet, deleteSet, SECTION_LABEL, FREQ_LABEL,
   LEVEL_LABEL, TYPE_LABEL, GROUP_LABEL, bbchText,
@@ -1158,7 +1158,7 @@ export function openCatalog() {
     segSeq++;
     segWrap.replaceChildren(h("div", { class: "seg", role: "radiogroup", "aria-label": "Kultur" },
       GROUP_FILTER.map(([k, label]) => segOpt("cat", label, catalogGroup === k, () => { catalogGroup = k; paint(); }))));
-    const traits = bon.traits.filter((t) => t.grp === catalogGroup);
+    const traits = bySection(bon.traits.filter((t) => t.grp === catalogGroup));
     const out = [];
     let last = null;
     for (const t of traits) {

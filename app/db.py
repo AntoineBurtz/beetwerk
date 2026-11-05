@@ -213,6 +213,7 @@ def session():
 
 def init_db() -> None:
     from .bonitur import seed_traits
+    from .profile import migrate_legacy
     from .seed import guess_trait_groups, seed_crops
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -233,6 +234,7 @@ def init_db() -> None:
         elif ("crops", "trait_group") in added:
             guess_trait_groups(conn)
         seed_traits(conn)
+        migrate_legacy(conn)
 
 
 # Spalten, die nach der ersten Version dazugekommen sind
@@ -263,6 +265,7 @@ MIGRATIONS = {
         ("bw_hash", "TEXT NOT NULL DEFAULT ''"),
     ],
     "varieties": [
+        ("profile", "TEXT NOT NULL DEFAULT ''"),        # Merkmale aus Recherche oder eigener Angabe (JSON)
         ("baserow_id", "INTEGER"),
         ("bw_hash", "TEXT NOT NULL DEFAULT ''"),
         ("baserow_file", "TEXT NOT NULL DEFAULT ''"),

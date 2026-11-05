@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import tempfile
+import time
 
 import pytest
 
@@ -52,8 +53,17 @@ def test_config_and_research(client, fake):
     assert r.status_code == 200, r.text
     out = r.json()
     assert out["name"] == "Ochsenherz" and out["kind"] == "Fleischtomate" and out["crop_id"] == tomate["id"]
+    # Merkmale: Klasse und Zahl getrennt, Spannen gemittelt, Unpassendes fällt weg
+    assert out["traits"] == {"plant_size": "groß", "height": 175, "tom_growth": "indeterminiert", "fruit_size": "sehr groß",
+                             "tom_fruit_weight": 250, "tom_fruit_color": "rot", "maturity_class": "mittelspät",
+                             "days_to_maturity": 80, "tom_fruit_shape": "herzförmig (Ochsenherz)"}
+    meta = {m["key"]: m for m in out["trait_meta"]}
+    assert meta["height"]["text"] == "175 cm" and meta["height"]["unit"] == "cm" and meta["plant_size"]["section"] == "plant"
     assert out["usage"]["web_search_requests"] == 2 and out["usage"]["input_tokens"] == 2000
     first = Fake.calls[0]["body"]
+    asked = first["messages"][0]["content"][-1]["text"]
+    assert "- plant_size: Pflanzengröße – genau eines von: sehr klein | klein | mittel | groß | sehr groß" in asked
+    assert "- height: Pflanzenhöhe – Zahl in cm" in asked and "pep_scoville" in asked  # Kultur noch unbekannt
     assert first["model"] == "claude-haiku-5-5"
     assert first["messages"][0]["content"][0]["type"] == "image"
     assert {t["name"] for t in first["tools"]} == {"web_search", "web_fetch"}
@@ -86,3 +96,45 @@ def test_private_addresses_are_refused(fake):
             research.fetch("file:///etc/passwd", 1000)
     finally:
         research.ALLOW_PRIVATE = True
+
+
+def test_batch_fills_only_empty_fields(client, fake):
+    from app import varieties
+    tomate = next(c for c in client.get("/api/data").json()["crops"] if c["name"] == "Tomate")
+    a = client.post("/api/varieties", json={"crop_id": tomate["id"], "name": "Ochsenherz Stapel", "kind": "Eigene Angabe",
+                                            "profile": {"plant_size": {"value": "mittel", "source": "manual"}}}).json()
+    b = client.post("/api/varieties", json={"crop_id": tomate["id"], "name": "Völlig unbekannt"}).json()
+    Fake.calls.clear()
+    r = client.post("/api/research/batch", json={"ids": [a["id"], b["id"], 999999]})
+    assert r.status_code == 202, r.text
+    for _ in range(100):
+        st = client.get("/api/research/batch").json()
+        if not st["running"]:
+            break
+        time.sleep(0.05)
+    assert st["done"] == 3 and st["total"] == 3 and st["skipped"] == ["Völlig unbekannt"] and st["failed"] == []
+    assert st["usage"]["web_search_requests"] == 4
+    # ohne Bildersuche
+    assert not any("/w/api.php" in str(c) for c in Fake.calls)
+    got = {v["id"]: v for v in client.get("/api/varieties").json()}
+    va, vb = got[a["id"]], got[b["id"]]
+    assert va["kind"] == "Eigene Angabe" and va["species"] == "Solanum lycopersicum" and va["description"]
+    assert va["profile"]["plant_size"] == {"value": "mittel", "source": "manual"}
+    assert va["profile"]["height"] == {"value": 175, "source": "internet"}
+    assert va["links"] and va["links"][0]["url"].endswith("/shop/ochsenherz")
+    assert st["filled"] == 3 + 8  # Art, Saatgut, Beschreibung und acht Merkmale
+    assert vb["profile"] == {} and vb["species"] == ""
+
+    # Ohne Schlüssel bricht der Lauf gleich ab
+    old = research.settings()["api_key"]
+    client.put("/api/research", json={"api_key": "falsch"})
+    client.post("/api/research/batch", json={"ids": [a["id"], b["id"]]})
+    for _ in range(100):
+        st = client.get("/api/research/batch").json()
+        if not st["running"]:
+            break
+        time.sleep(0.05)
+    assert len(st["failed"]) == 1 and "nicht angenommen" in st["stopped"] and st["done"] == 0
+    client.put("/api/research", json={"api_key": old})
+    assert varieties.BATCH_MAX == 100
+    assert client.post("/api/research/batch", json={"ids": []}).status_code == 422

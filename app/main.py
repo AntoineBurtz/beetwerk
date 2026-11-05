@@ -17,13 +17,13 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import baserow, bonitur, db, geo, research, varieties, weather
+from . import baserow, bonitur, db, geo, profile, research, varieties, weather
 from .seed import guess_trait_groups, seed_demo
 
 VERSION = "1.1.0"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 IMAGE_PATH = db.DATA_DIR / "imagery" / "garden.jpg"
-INTERNAL_SETTINGS = {"geo", "imagery_custom", bonitur.SEEDED_KEY, *weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
+INTERNAL_SETTINGS = {"geo", "imagery_custom", bonitur.SEEDED_KEY, profile.MIGRATED_KEY, *weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
 # Nicht in die Sicherung: Abrufzustand und Zugangsdaten
 NOT_EXPORTED = {*weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
 
@@ -547,6 +547,8 @@ async def import_all(request: Request):
                     _encode_varieties(record)
                 if table == "varieties" and isinstance(record.get("links"), list):
                     record["links"] = json.dumps(record["links"], ensure_ascii=False) if record["links"] else ""
+                if table == "varieties" and isinstance(record.get("profile"), dict):
+                    record["profile"] = json.dumps(record["profile"], ensure_ascii=False) if record["profile"] else ""
                 conn.execute(
                     f"INSERT INTO {table}({', '.join(record)}) VALUES ({', '.join('?' for _ in record)})",
                     list(record.values()),
@@ -554,6 +556,7 @@ async def import_all(request: Request):
         if any("trait_group" not in c for c in data.get("crops") or []):
             guess_trait_groups(conn)  # ältere Sicherung ohne Bonitur-Zuordnung
         bonitur.import_tables(conn, data)
+        profile.migrate_legacy(conn)  # ältere Sicherung mit Wuchs, Fruchtfarbe und Reife als Freitext
         for key, value in {**db.DEFAULT_SETTINGS, **keep}.items():
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
     return all_data()

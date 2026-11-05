@@ -2,7 +2,7 @@
 import { state } from "./store.js";
 import { h } from "./util.js";
 import { openCropEditor } from "./editor.js";
-import { varietiesView } from "./varieties.js";
+import { varietiesView, forgetProfiles } from "./varieties.js";
 import { replaceKeepingFocus } from "./ui.js";
 
 let filter = "";
@@ -23,6 +23,7 @@ function tabs(render) {
 }
 
 export function mountCrops(root) {
+  forgetProfiles(); // Bonitur kann sich inzwischen geändert haben
   const page = h("div", { class: "page" });
   root.append(page);
 

@@ -97,6 +97,19 @@ TRAITS = [
     _regular("photo", "Foto", "photo", freq="event", level="both", stage="beliebig"),
     _regular("note", "Notiz", "text", freq="event", level="both", stage="beliebig"),
 
+    # Für alle Kulturen, einmalig: Größenklassen und Reife, jeweils mit eigenem Feld für die Zahl
+    _t("plant_size", "Pflanzengröße", "choice", options=["sehr klein", "klein", "mittel", "groß", "sehr groß"],
+       bbch=FROM_BLOOM, stage="ab Blüte", hint="Klasse; die Höhe in cm ist ein eigenes Merkmal (Pflanzenhöhe)"),
+    _t("fruit_size", "Fruchtgröße", "choice", section="fruit",
+       options=["sehr klein", "klein", "mittel", "groß", "sehr groß"], bbch=RIPE, stage="Reife",
+       hint="Klasse; das Gewicht in g ist ein eigenes Merkmal (Fruchtgewicht)", ref="UPOV Fruchtgröße"),
+    _t("maturity_class", "Reifezeit", "choice", section="fruit", level="variety",
+       options=["sehr früh", "früh", "mittelfrüh", "mittel", "mittelspät", "spät", "sehr spät"],
+       stage="einmal je Sorte", hint="Klasse; die Tage bis zur Reife sind ein eigenes Merkmal"),
+    _t("days_to_maturity", "Tage bis Reife", "number", section="fruit", level="variety", unit="Tage", min_=0,
+       max_=400, stage="einmal je Sorte",
+       hint="ab Pflanzung, bei Direktsaat ab Aussaat; die Bonitur rechnet es aus dem ersten Tag mit BBCH 81"),
+
     # Tomate, einmalig (UPOV TG/44)
     _t("tom_hypocotyl", "Anthocyan am Hypokotyl", "choice", grp="tomato", options=PRESENT,
        bbch=SEEDLING, stage="Keimling (BBCH 10–12)", ref="UPOV 1"),
@@ -214,6 +227,8 @@ TRAITS = [
     _t("pep_heat", "Schärfegrad", "score", grp="pepper", section="taste",
        options={"0": "nicht scharf", "5": "scharf", "10": "extrem scharf"}, min_=0, max_=10, bbch=RIPE,
        stage="Verkostung", hint="Probe an der Plazenta, 2–3 Früchte"),
+    _t("pep_scoville", "Schärfe in Scoville", "number", grp="pepper", section="taste", level="variety", unit="SHU",
+       min_=0, max_=3000000, stage="einmal je Sorte", hint="Angabe von Händler oder Literatur; der Schärfegrad ist die eigene Note"),
     _t("pep_aroma", "Aroma", "multi", grp="pepper", section="taste",
        options=["fruchtig", "zitronig", "rauchig", "grasig", "anderes"], bbch=RIPE, stage="Verkostung"),
     _t("pep_sweet", "Süße", "score", grp="pepper", section="taste",
