@@ -1,10 +1,10 @@
 // Sortenliste: Saatgut mit Einordnung, Foto und Quellen, dazu die Recherche mit Claude.
 import { state, find, create, patch, remove, api } from "./store.js";
-import { h, plural, isMixed } from "./util.js";
+import { h, plural, isMixed, fmtDay, dayNum } from "./util.js";
 import { toast, confirmDialog, icon } from "./ui.js";
 import { shell, field } from "./editor.js";
 import { shrinkPhoto } from "./bwidgets.js";
-import { profileForm, cardTraits, SOURCE_LABEL } from "./profileform.js";
+import { profileForm, profileView, cardTraits, SOURCE_LABEL } from "./profileform.js";
 
 let query = "";
 let cropFilter = "";
@@ -171,7 +171,7 @@ export function varietiesView(rerender) {
     const sum = summaries?.[v.id] || [];
     const bonYear = Math.max(0, ...sum.filter((x) => x.source === "bonitur").map((x) => x.year || 0));
     const traits = cardTraits(sum);
-    return h("button", { type: "button", class: "var-card", onclick: () => openVarietyEditor(v, rerender) },
+    return h("button", { type: "button", class: "var-card", onclick: () => openVarietyDetail(v, rerender) },
       h("span", { class: "var-thumb" }, thumb(v, crop)),
       h("span", { class: "var-body" },
         h("span", { class: "var-name" }, v.name),
@@ -206,7 +206,7 @@ export function varietiesView(rerender) {
         : "Noch keine Sorten. Lege eine an, recherchiere neue Samen mit Claude oder übernimm die Sorten aus deinen Sätzen."));
 }
 
-// ---------------------------------------------------------------- Bearbeiten
+// ---------------------------------------------------------------- Bausteine
 
 function cropSelect(value, { allowNone = true, extra } = {}) {
   const crops = [...state.crops].sort((a, b) => a.name.localeCompare(b.name, "de"));
@@ -242,7 +242,102 @@ function linksEditor(initial) {
   return { el: box, get: () => links };
 }
 
-export function openVarietyEditor(variety, after, prefill = null) {
+// ---------------------------------------------------------------- Übersicht (nur lesen)
+
+function plantingsOf(v) {
+  const key = v.name.trim().toLowerCase();
+  return state.plantings
+    .filter((p) => p.crop_id === v.crop_id)
+    .map((p) => {
+      const mix = isMixed(p) ? p.varieties.find((x) => x.name.trim().toLowerCase() === key) : null;
+      return mix || (!isMixed(p) && (p.variety || "").trim().toLowerCase() === key) ? { p, count: mix?.count } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.p.plant_date || b.p.sow_date).localeCompare(a.p.plant_date || a.p.sow_date));
+}
+
+function facts(pairs) {
+  const shown = pairs.filter(([, value]) => value);
+  return shown.length ? h("dl", { class: "var-facts" }, shown.map(([label, value]) => h("div", {}, h("dt", {}, label), h("dd", {}, value)))) : null;
+}
+
+function block(title, ...kids) {
+  return h("section", { class: "var-block" }, h("h3", {}, title), ...kids);
+}
+
+function when(iso) {
+  return iso ? fmtDay(dayNum(iso.slice(0, 10)), { year: true }) : "";
+}
+
+export function openVarietyDetail(variety, after) {
+  const v = find.variety(variety.id) || variety;
+  const crop = find.crop(v.crop_id);
+  // Nach Bearbeiten oder Recherche wieder hierher, mit dem neuen Stand
+  const back = () => { const fresh = find.variety(v.id); if (fresh) openVarietyDetail(fresh, after); };
+  const reopen = () => { after?.(); back(); };
+
+  const ui = shell(v.name, {
+    extraHead: h("span", { class: "var-head-crop" }, h("span", { class: "dot", style: { background: crop?.color } }), crop?.name || "ohne Kultur"),
+    onSubmit: () => { openVarietyEditor(v, reopen, null, { onCancel: back }); },
+  });
+  ui.dlg.classList.add("var-detail");
+
+  const photo = v.photo
+    ? h("figure", { class: "var-hero" },
+      h("a", { href: `/api/photos/${v.photo}`, target: "_blank", rel: "noopener", title: "Foto groß öffnen" },
+        h("img", { src: `/api/photos/${v.photo}?thumb=1`, alt: `Foto von ${v.name}` })),
+      v.photo_credit ? h("figcaption", {}, v.photo_credit) : null)
+    : h("div", { class: "var-hero empty" }, thumb(v, crop));
+  const main = facts([["Botanische Art", v.species], ["Typ", v.kind], ["Saatgut", v.seed], ["Bezugsquelle", v.supplier], ["Gekauft", v.bought]]);
+  const nothing = ["species", "kind", "seed", "supplier", "bought", "description"].every((k) => !v[k]);
+
+  const profBox = h("div", {}, h("p", { class: "muted small", style: { margin: 0 } }, "Lade Merkmale …"));
+  api.get(`/api/varieties/${v.id}/profile`).then((res) => {
+    const view = profileView(res.rows);
+    const bon = res.rows.some((r) => r.bonitur);
+    fill(profBox, view || h("p", { class: "muted small", style: { margin: 0 } },
+      "Noch keine Merkmale. „Mit Claude ergänzen“ holt sie aus dem Internet; nach der Saison stehen hier die Werte deiner Bonitur."),
+    view && !bon ? h("p", { class: "muted small", style: { margin: "10px 0 0" } }, "Sobald es Werte aus deiner Bonitur gibt, gehen sie vor.") : null);
+  }).catch((e) => fill(profBox, h("p", { class: "form-error", style: { margin: 0 } }, `Merkmale konnten nicht geladen werden: ${e.message}`)));
+
+  const uses = plantingsOf(v);
+  const usesList = uses.length ? h("ul", { class: "var-uses" }, uses.map(({ p, count }) => {
+    const start = p.plant_date || p.sow_date;
+    return h("li", {},
+      h("strong", {}, start.slice(0, 4)),
+      h("span", {}, find.bed(p.bed_id)?.name || "ohne Beet", count ? ` · ${plural(count, "Pflanze", "Pflanzen")}` : ""),
+      h("span", { class: "muted" }, `${p.plant_date ? "gepflanzt" : "gesät"} ${fmtDay(dayNum(start))}`
+        + ` · Ernte ${fmtDay(dayNum(p.harvest_start))} bis ${fmtDay(dayNum(p.harvest_end))}`));
+  })) : null;
+
+  ui.body.append(
+    h("div", { class: "var-top" }, photo,
+      h("div", { class: "var-top-text" },
+        main,
+        v.description ? h("p", { class: "var-desc" }, v.description) : null,
+        nothing ? h("p", { class: "muted small", style: { margin: 0 } }, "Art, Typ und Beschreibung sind noch leer.") : null)),
+    block("Merkmale", profBox),
+    usesList ? block(`In ${plural(uses.length, "Satz", "Sätzen")}`, usesList) : null,
+    v.links?.length ? block("Quellen", h("ul", { class: "var-src" }, v.links.map((l) => h("li", {},
+      h("a", { href: l.url, target: "_blank", rel: "noopener" }, l.title || l.url))))) : null,
+    v.notes ? block("Notizen", h("p", { class: "var-notes" }, v.notes)) : null,
+    v.created_at ? h("p", { class: "muted small", style: { margin: 0 } },
+      `Angelegt am ${when(v.created_at)}` + (v.updated_at && v.updated_at.slice(0, 10) !== v.created_at.slice(0, 10)
+        ? ` · zuletzt geändert am ${when(v.updated_at)}` : "")) : null);
+  ui.foot.append(
+    h("button", { type: "button", class: "btn", onclick: () => {
+      ui.dlg.close();
+      openResearch({ base: v, after: reopen, onCancel: back });
+    } }, "Mit Claude ergänzen"),
+    h("span", { class: "spacer" }),
+    h("button", { type: "button", class: "btn btn-quiet", onclick: () => ui.dlg.close() }, "Schließen"),
+    h("button", { type: "submit", class: "btn btn-primary" }, icon("edit"), "Bearbeiten"));
+  ui.open();
+}
+
+// ---------------------------------------------------------------- Sorte bearbeiten
+
+export function openVarietyEditor(variety, after, prefill = null, { onCancel } = {}) {
   const isNew = !variety?.id;
   const v = { name: "", crop_id: null, photo: "", photo_credit: "", description: "", notes: "", links: [], profile: {}, ...variety, ...prefill };
   const name = h("input", { value: v.name, maxlength: 120, required: true });
@@ -299,16 +394,19 @@ export function openVarietyEditor(variety, after, prefill = null) {
     profile: prof.get(),
   });
 
-  const ui = shell(isNew ? "Neue Sorte" : v.name, {
+  let done = false; // gespeichert, gelöscht oder weiter zur Recherche: dann nicht zurück zur Übersicht
+  const ui = shell(isNew ? "Neue Sorte" : `${v.name} bearbeiten`, {
     onSubmit: async () => {
       const data = collect();
       if (!data.name) throw new Error("Bitte einen Sortennamen eingeben");
       if (isNew) await create("varieties", data);
       else await patch("varieties", v.id, data, { silent: true });
+      done = true;
       forgetProfiles();
       after?.();
     },
   });
+  ui.dlg.addEventListener("close", () => { if (!done) onCancel?.(); });
   ui.body.append(
     h("div", { class: "grid-2" }, field("Sorte", name), field("Kultur", crop)),
     h("div", { class: "grid-2" }, FIELDS.map(([k, label]) => field(label, inputs[k]))), seedList,
@@ -324,6 +422,7 @@ export function openVarietyEditor(variety, after, prefill = null) {
   ui.foot.append(
     isNew ? null : h("button", { type: "button", class: "btn btn-danger", onclick: async () => {
       if (!(await confirmDialog(`„${v.name}“ wird aus der Sortenliste gelöscht. Sätze mit dieser Sorte bleiben.`, { title: "Sorte löschen?" }))) return;
+      done = true;
       ui.dlg.close();
       try { await remove("varieties", v.id); after?.(); toast(`${v.name} gelöscht`); } catch { /* Meldung kam schon */ }
     } }, "Löschen"),
@@ -332,8 +431,9 @@ export function openVarietyEditor(variety, after, prefill = null) {
       try { data = collect(); } catch (e) { ui.showError(e.message); return; }
       if (!data.profile) delete data.profile;
       if (!data.name) { ui.showError("Für die Recherche zuerst den Sortennamen eintragen"); return; }
+      done = true;
       ui.dlg.close();
-      openResearch({ base: { ...v, ...data }, after });
+      openResearch({ base: { ...v, ...data }, after, onCancel });
     } }, "Mit Claude ergänzen"),
     h("span", { class: "spacer" }),
     h("button", { type: "button", class: "btn btn-quiet", onclick: () => ui.dlg.close() }, "Abbrechen"),
@@ -357,14 +457,17 @@ function fmtTokens(n) {
   return Number(n || 0).toLocaleString("de-DE");
 }
 
-export async function openResearch({ base = null, after } = {}) {
+// onCancel: wenn ohne Speichern geschlossen wird (z. B. zurück zur Übersicht der Sorte)
+export async function openResearch({ base = null, after, onCancel } = {}) {
   const st = await researchStatus();
   if (!st.configured) {
     const ok = await confirmDialog("Für die Recherche braucht Beetwerk einen API-Schlüssel von Claude. Den trägst du in den Einstellungen unter „KI-Recherche“ ein.",
       { ok: "Zu den Einstellungen", danger: false, title: "API-Schlüssel fehlt" });
     if (ok) document.getElementById("settings-btn")?.click();
+    else onCancel?.();
     return;
   }
+  let saved = false;
   let packet = null; // data:-URL des Tütchenfotos
   const name = h("input", { value: base?.name || "", placeholder: "z. B. Ochsenherz", maxlength: 120 });
   const crop = cropSelect(base?.crop_id ?? null, { allowNone: false, extra: h("option", { value: "", selected: !base?.crop_id }, "automatisch erkennen") });
@@ -536,6 +639,7 @@ export async function openResearch({ base = null, after } = {}) {
       await create("varieties", data);
       toast(`${data.name} in die Sortenliste übernommen`);
     }
+    saved = true;
     forgetProfiles();
     after?.();
   }
@@ -543,5 +647,6 @@ export async function openResearch({ base = null, after } = {}) {
   paintAsk();
   ui.body.append(stage);
   ui.foot.append(h("span", { class: "spacer" }), back, go);
+  ui.dlg.addEventListener("close", () => { if (!saved) onCancel?.(); });
   ui.open();
 }

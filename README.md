@@ -133,7 +133,7 @@ In „Beetwerk-Sorten“ stehen die Merkmale so, wie Beetwerk sie bei der Sorte 
 
 ## Sortenliste und Saatgut-Recherche
 
-Unter **Kulturen → Sorten** steht die Sortenliste: Kultur, botanische Art, Typ, Saatgut (samenfest oder F1), Bezugsquelle, Beschreibung, Merkmale, Foto mit Bildquelle und Quellen. „Aus Sätzen übernehmen“ legt alle Sorten an, die schon in deinen Sätzen stehen. Im Satz-Dialog schlägt Beetwerk die Sorten der gewählten Kultur vor.
+Unter **Kulturen → Sorten** steht die Sortenliste: Kultur, botanische Art, Typ, Saatgut (samenfest oder F1), Bezugsquelle, Beschreibung, Merkmale, Foto mit Bildquelle und Quellen. Ein Klick auf eine Sorte öffnet ihre Übersicht zum Lesen: Foto, Art, Typ, Saatgut, Bezugsquelle, Beschreibung, Merkmale mit Herkunft, die Sätze mit dieser Sorte, Quellen und Notizen. Ändern lässt sich erst nach „Bearbeiten“; nach dem Speichern oder Abbrechen geht es zurück zur Übersicht. „Aus Sätzen übernehmen“ legt alle Sorten an, die schon in deinen Sätzen stehen. Im Satz-Dialog schlägt Beetwerk die Sorten der gewählten Kultur vor.
 
 **Merkmale der Sorte** sind dieselben wie in der Bonitur (für Tomate und Paprika/Chili die UPOV-Merkmale, dazu Pflanzengröße, Fruchtgröße, Reifezeit und Tage bis Reife für alle Kulturen). Klasse und Zahl sind getrennte Felder: Pflanzengröße „groß“ und Pflanzenhöhe „175 cm“, Fruchtgröße und Fruchtgewicht, Reifezeit und Tage bis Reife, Schärfegrad und Scoville. Jeder Wert zeigt seine Herkunft:
 
