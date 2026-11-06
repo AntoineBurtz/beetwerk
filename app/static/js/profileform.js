@@ -206,3 +206,29 @@ export function cardTraits(summary, max = 4) {
   const by = new Map(summary.map((s) => [s.key, s]));
   return CARD.filter(([k]) => by.has(k)).slice(0, max).map(([k, f]) => ({ text: f(by.get(k).text), source: by.get(k).source }));
 }
+
+// Nur lesen: Merkmale mit Wert, nach Abschnitt, mit Herkunft (für die Übersicht einer Sorte)
+export function profileView(rows) {
+  const list = ordered(rows.filter((r) => r.text));
+  if (!list.length) return null;
+  const out = [];
+  let last = null;
+  let grid = null;
+  for (const r of list) {
+    const g = GROUP[r.section] || "plant";
+    if (g !== last) {
+      last = g;
+      grid = h("dl", { class: "pv-grid" });
+      out.push(h("div", { class: "prof-group" }, h("h4", {}, GROUP_LABEL[g]), grid));
+    }
+    const b = r.bonitur;
+    const notes = [];
+    if (b?.detail) notes.push(b.detail + (b.years?.length > 1 ? ` (auch ${b.years.slice(1).join(", ")})` : ""));
+    if (b && r.stored) notes.push(`${SOURCE_LABEL[r.stored.source] || "Angabe"}: ${fmtValue(r, r.stored.value)}`);
+    grid.append(h("div", { class: "pv-item" },
+      h("dt", {}, r.name),
+      h("dd", {}, h("span", { class: "pv-value" }, r.text), badge(r.source, b?.year),
+        notes.length ? h("span", { class: "pv-note" }, notes.join(" · ")) : null)));
+  }
+  return h("div", { class: "prof" }, out);
+}
