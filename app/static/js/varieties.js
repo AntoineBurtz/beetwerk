@@ -84,7 +84,7 @@ async function startBatch(ids) {
     `Claude sucht für ${plural(ids.length, "Sorte", "Sorten")} ohne Merkmale nacheinander im Netz und füllt leere Angaben: `
     + "Merkmale, Art, Typ, Saatgut, Beschreibung und Quellen. Was schon eingetragen ist, bleibt. "
     + "Sorten, die Claude nicht sicher findet, bleiben leer. Bilder wählst du danach bei jeder Sorte selbst. "
-    + "Das dauert etwa eine halbe Minute je Sorte und kostet je Sorte einige Cent API-Guthaben.",
+    + "Das dauert bis zu einer Minute je Sorte und kostet je Sorte einige Cent API-Guthaben.",
     { ok: "Recherchieren", danger: false, title: "Merkmale recherchieren?" });
   if (!ok) return;
   try {
@@ -418,10 +418,12 @@ export async function openResearch({ base = null, after } = {}) {
     go.disabled = true;
     go.textContent = "Claude sucht …";
     fill(stage, h("div", { class: "research-busy" }, h("span", { class: "spinner", "aria-hidden": "true" }),
-      h("span", {}, "Claude sucht im Netz. Das dauert meist 20 bis 60 Sekunden.")));
+      h("span", {}, "Claude sucht im Netz und fragt bei fehlenden Merkmalen gezielt nach. Das dauert meist 30 Sekunden bis 2 Minuten.")));
+    // Was die Sorte schon hat, muss Claude nicht suchen
+    const known = [...Object.keys(base?.profile || {}), ...["species", "kind", "seed", "description"].filter((k) => base?.[k])];
     try {
       result = await api.post("/api/research/variety", {
-        name: name.value.trim(), crop_id: crop.value ? Number(crop.value) : null, hint: hint.value.trim(), image: packet,
+        name: name.value.trim(), crop_id: crop.value ? Number(crop.value) : null, hint: hint.value.trim(), image: packet, known,
       });
     } catch (e) {
       paintAsk();
@@ -477,7 +479,7 @@ export async function openResearch({ base = null, after } = {}) {
     form = { nameIn, cropIn, inputs, desc, imgs, get chosen() { return chosen; }, keep, unknownCrop, prof, meta };
     fill(stage, 
       h("div", { class: "research-meta" }, conf,
-        h("span", { class: "muted small" }, `${plural(u.web_search_requests || 0, "Suche", "Suchen")} · ${fmtTokens((u.input_tokens || 0) + (u.output_tokens || 0))} Tokens · ${result.model}`)),
+        h("span", { class: "muted small" }, `${plural(u.web_search_requests || 0, "Suche", "Suchen")} · ${fmtTokens((u.input_tokens || 0) + (u.output_tokens || 0))} Tokens${result.rounds > 1 ? " · mit Nachfrage" : ""} · ${result.model}`)),
       base?.id ? h("p", { class: "muted small", style: { margin: 0 } }, "Grün hinterlegt ist, was Claude ergänzt hat; vorhandene Angaben bleiben.") : null,
       h("div", { class: "grid-2" }, field("Sorte", nameIn), field("Kultur", cropIn)),
       h("div", { class: "grid-2" }, FIELDS.map(([k, label]) => field(label, inputs[k]))),

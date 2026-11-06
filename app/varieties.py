@@ -200,6 +200,7 @@ class ResearchIn(BaseModel):
     crop_id: Optional[int] = None
     hint: str = Field("", max_length=1000)
     image: Optional[str] = Field(None, max_length=8_000_000)  # data:image/jpeg;base64,…
+    known: list[str] = Field(default_factory=list, max_length=300)  # schon ausgefüllt: Merkmal-Schlüssel und Felder
 
 
 class FromUrlIn(BaseModel):
@@ -233,32 +234,66 @@ def research_test(body: ResearchConfigIn):
 
 @router.post("/api/research/variety")
 def research_variety(body: ResearchIn):
+    known = set(body.known)
     with db.session() as conn:
-        crops, asked, known = _asked(conn, body.crop_id)
-    crop = known["name"] if known else ""
+        crops, asked, given, pool = _asked(conn, body.crop_id, known)
     try:
         image = research.decode_image(body.image) if body.image else None
-        out = research.research(body.name, crop, [c["name"] for c in crops], body.hint, image, asked)
+        out = research.research(body.name, given["name"] if given else "", [c["name"] for c in crops], body.hint, image,
+                                asked, more=_more(crops, pool, body.crop_id, known))
     except research.ResearchError as exc:
         _fail(exc)
-    # Kultur der Antwort einer vorhandenen zuordnen
-    named = (out.get("crop") or "").strip().lower()
-    match = next((c for c in crops if c["name"].lower() == named), None) or \
-        next((c for c in crops if named and (c["name"].lower() in named or named in c["name"].lower())), None)
-    out["crop_id"] = body.crop_id or (match["id"] if match else None)
-    group = next((c["trait_group"] or "" for c in crops if c["id"] == out["crop_id"]), "")
-    out["traits"], out["trait_meta"] = _found_traits(asked, out.get("traits"), out["crop_id"], group)
+    match = given or _match_crop(crops, out.get("crop"))
+    out["crop_id"] = match["id"] if match else None
+    group = (match or {}).get("trait_group") or ""
+    wanted = _wanted(pool, group, known) if match else asked
+    out["traits"], out["trait_meta"] = _found_traits(wanted, out.get("traits"), out["crop_id"], group)
     return out
 
 
-def _asked(conn, crop_id: Optional[int]) -> tuple[list[dict], list[dict], Optional[dict]]:
-    """Kulturen, die Merkmale für die Recherche und die bekannte Kultur."""
+def _asked(conn, crop_id: Optional[int], known=frozenset()) -> tuple[list[dict], list[dict], Optional[dict], list[dict]]:
+    """Kulturen, die Merkmale für die erste Frage, die bekannte Kultur und alle recherchierbaren Merkmale."""
     crops = db.rows(conn, "SELECT id, name, trait_group FROM crops ORDER BY name")
-    all_traits = [bonitur.trait_out(t) for t in db.rows(conn, "SELECT * FROM traits WHERE active = 1")]
-    known = next((c for c in crops if c["id"] == crop_id), None)
-    groups = {known["trait_group"] or "all"} if known else {"all", "tomato", "pepper"}
-    asked = profile._sorted([t for t in all_traits if profile.researchable(t) and t["grp"] in groups | {"all"}])
-    return crops, asked, known
+    pool = profile._sorted([t for t in (bonitur.trait_out(t) for t in db.rows(conn, "SELECT * FROM traits WHERE active = 1"))
+                            if profile.researchable(t)])
+    given = next((c for c in crops if c["id"] == crop_id), None)
+    groups = {given["trait_group"] or "all"} if given else {"all", "tomato", "pepper"}
+    asked = [t for t in pool if t["grp"] in groups | {"all"} and t["key"] not in known]
+    return crops, asked, given, pool
+
+
+def _wanted(pool: list[dict], group: str, known) -> list[dict]:
+    return [t for t in pool if t["grp"] in {"all", group} and t["key"] not in known]
+
+
+def _match_crop(crops: list[dict], named) -> Optional[dict]:
+    """Kultur der Antwort einer vorhandenen zuordnen."""
+    named = (named or "").strip().lower()
+    if not named:
+        return None
+    return next((c for c in crops if c["name"].lower() == named), None) or \
+        next((c for c in crops if c["name"].lower() in named or named in c["name"].lower()), None)
+
+
+def _more(crops: list[dict], pool: list[dict], crop_id: Optional[int], known):
+    """Nach der ersten Antwort: Was fehlt noch? Dann fragt die Recherche in derselben Unterhaltung nach.
+
+    Nachgefragt wird, wenn die Kultur vorher unbekannt war (die erste Frage enthielt die Merkmale aller Kulturen)
+    oder wenn wichtige Merkmale fehlen, z. B. Scoville bei Chilis.
+    """
+    def more(out: dict) -> Optional[dict]:
+        crop = next((c for c in crops if c["id"] == crop_id), None) if crop_id else _match_crop(crops, out.get("crop"))
+        group = (crop or {}).get("trait_group") or ""
+        wanted = _wanted(pool, group, known)
+        found, _ = _found_traits(wanted, out.get("traits"), crop["id"] if crop else None, group)
+        missing = sorted((t for t in wanted if t["key"] not in found), key=lambda t: t["key"] not in profile.CORE)
+        fields = [k for k in research.FOLLOW_FIELDS if not out.get(k) and k not in known]
+        if crop_id and not any(t["key"] in profile.CORE for t in missing):
+            return None
+        if not missing and not fields:
+            return None
+        return {"crop": crop["name"] if crop else out.get("crop") or "", "traits": missing, "fields": fields}
+    return more
 
 
 def _found_traits(asked: list[dict], raw, crop_id: Optional[int], group: str) -> tuple[dict, list]:
@@ -326,28 +361,32 @@ def _run_batch(ids: list[int]) -> None:
         usage = _batch["usage"]
         for vid in ids:
             with db.session() as conn:
-                row = conn.execute("SELECT v.id, v.name, v.crop_id, c.name AS crop FROM varieties v "
+                row = conn.execute("SELECT v.*, c.name AS crop FROM varieties v "
                                    "LEFT JOIN crops c ON c.id = v.crop_id WHERE v.id = ?", (vid,)).fetchone()
-                crops, asked, known = _asked(conn, row["crop_id"] if row else None)
+                stored = bonitur._loads(row["profile"], {}) or {} if row else {}
+                known = set(stored) | ({k for k in research.FOLLOW_FIELDS if (row[k] or "").strip()} if row else set())
+                crops, asked, given, pool = _asked(conn, row["crop_id"] if row else None, known)
             if row is None:
                 _batch["done"] += 1
                 continue
+            more = _more(crops, pool, row["crop_id"], known)
             _batch["current"] = row["name"]
             try:
+                args = (row["name"], row["crop"] or "", [c["name"] for c in crops], "", None, asked)
                 try:
-                    out = research.research(row["name"], row["crop"] or "", [c["name"] for c in crops], "", None, asked,
-                                            images=False)
+                    out = research.research(*args, images=False, more=more)
                 except research.BusyError:
                     time.sleep(BUSY_WAIT)  # einmal abwarten und noch einmal versuchen
-                    out = research.research(row["name"], row["crop"] or "", [c["name"] for c in crops], "", None, asked,
-                                            images=False)
+                    out = research.research(*args, images=False, more=more)
                 for k, n in (out.get("usage") or {}).items():
                     usage[k] = usage.get(k, 0) + n
                 if out.get("confidence") == "niedrig":
                     _batch["skipped"].append(row["name"])  # nicht sicher genau diese Sorte: lieber nichts eintragen
                 else:
-                    group = (known or {}).get("trait_group") or ""
-                    traits, _ = _found_traits(asked, out.get("traits"), row["crop_id"], group)
+                    match = given or _match_crop(crops, out.get("crop"))
+                    group = (match or {}).get("trait_group") or ""
+                    wanted = _wanted(pool, group, known) if match else asked
+                    traits, _ = _found_traits(wanted, out.get("traits"), match["id"] if match else None, group)
                     _batch["filled"] += _merge_research(vid, out, traits)
             except research.ResearchError as exc:
                 _batch["failed"].append({"name": row["name"], "error": str(exc)})

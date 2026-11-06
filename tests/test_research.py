@@ -54,12 +54,22 @@ def test_config_and_research(client, fake):
     out = r.json()
     assert out["name"] == "Ochsenherz" and out["kind"] == "Fleischtomate" and out["crop_id"] == tomate["id"]
     # Merkmale: Klasse und Zahl getrennt, Spannen gemittelt, Unpassendes fällt weg
+    # Kultur war vorher unbekannt: eine Nachfrage in derselben Unterhaltung füllt, was für Tomaten noch fehlt
     assert out["traits"] == {"plant_size": "groß", "height": 175, "tom_growth": "indeterminiert", "fruit_size": "sehr groß",
                              "tom_fruit_weight": 250, "tom_fruit_color": "rot", "maturity_class": "mittelspät",
-                             "days_to_maturity": 80, "tom_fruit_shape": "herzförmig (Ochsenherz)"}
+                             "days_to_maturity": 80, "tom_fruit_shape": "herzförmig (Ochsenherz)",
+                             "tom_locules": "5–6", "tom_brix": 5.5}
     meta = {m["key"]: m for m in out["trait_meta"]}
     assert meta["height"]["text"] == "175 cm" and meta["height"]["unit"] == "cm" and meta["plant_size"]["section"] == "plant"
-    assert out["usage"]["web_search_requests"] == 2 and out["usage"]["input_tokens"] == 2000
+    assert out["rounds"] == 2 and len(Fake.calls) == 3
+    assert out["usage"]["web_search_requests"] == 3 and out["usage"]["input_tokens"] == 3000
+    follow = Fake.calls[2]["body"]
+    assert [m["role"] for m in follow["messages"]] == ["user", "assistant", "user"]
+    assert follow["messages"][1]["content"][0]["type"] == "server_tool_use"  # Suchergebnisse der ersten Runde gehen mit
+    nach = follow["messages"][2]["content"][0]["text"]
+    assert "(Tomate)" in nach and "- tom_locules:" in nach and "- tom_brix:" in nach and "- pep_" not in nach
+    assert "- tom_fruit_weight:" not in nach and "- height:" not in nach  # schon gefunden
+    assert [x["url"].rsplit("/", 1)[-1] for x in out["sources"]] == ["ochsenherz", "datenblatt"]
     first = Fake.calls[0]["body"]
     asked = first["messages"][0]["content"][-1]["text"]
     assert "- plant_size: Pflanzengröße – genau eines von: sehr klein | klein | mittel | groß | sehr groß" in asked
@@ -70,6 +80,15 @@ def test_config_and_research(client, fake):
     assert Fake.calls[0]["headers"]["anthropic-version"] == "2023-06-01"
     # zweite Runde nach pause_turn trägt die Antwort der ersten mit
     assert Fake.calls[1]["body"]["messages"][1]["role"] == "assistant"
+
+    # Kultur bekannt und das Wichtige gefunden: keine Nachfrage. Schon Ausgefülltes wird nicht erfragt.
+    Fake.calls.clear()
+    out2 = client.post("/api/research/variety", json={"name": "Ochsenherz", "crop_id": tomate["id"],
+                                                      "known": ["tom_fruit_weight", "description"]}).json()
+    assert out2["rounds"] == 1 and len(Fake.calls) == 2
+    asked2 = Fake.calls[0]["body"]["messages"][0]["content"][-1]["text"]
+    assert "pep_scoville" not in asked2 and "- tom_fruit_weight:" not in asked2 and "- tom_brix:" in asked2
+    assert "tom_fruit_weight" not in out2["traits"] and out2["traits"]["height"] == 175
     credits = {i["credit"] for i in out["images"]}
     assert any("Wikimedia Commons" in c and "CC BY-SA" in c for c in credits)
     shop = next(i for i in out["images"] if i["url"].endswith("/img/shop.jpg"))
@@ -113,7 +132,7 @@ def test_batch_fills_only_empty_fields(client, fake):
             break
         time.sleep(0.05)
     assert st["done"] == 3 and st["total"] == 3 and st["skipped"] == ["Völlig unbekannt"] and st["failed"] == []
-    assert st["usage"]["web_search_requests"] == 4
+    assert st["usage"]["web_search_requests"] == 4  # Kultur bekannt, Wichtiges gefunden: keine Nachfrage
     # ohne Bildersuche
     assert not any("/w/api.php" in str(c) for c in Fake.calls)
     got = {v["id"]: v for v in client.get("/api/varieties").json()}
@@ -138,3 +157,38 @@ def test_batch_fills_only_empty_fields(client, fake):
     client.put("/api/research", json={"api_key": old})
     assert varieties.BATCH_MAX == 100
     assert client.post("/api/research/batch", json={"ids": []}).status_code == 422
+
+
+def test_one_step_fills_what_the_first_answer_missed(client, fake):
+    """Neue Chili ohne gewählte Kultur: Scoville fehlt in der ersten Antwort und kommt mit der Nachfrage."""
+    chili = next(c for c in client.get("/api/data").json()["crops"] if c["name"] == "Chili")
+    Fake.calls.clear()
+    out = client.post("/api/research/variety", json={"name": "Habanero Orange"}).json()
+    assert out["crop_id"] == chili["id"] and out["rounds"] == 2 and len(Fake.calls) == 3
+    assert out["traits"]["pep_scoville"] == 225000 and out["traits"]["pep_fruit_weight"] == 8
+    assert out["traits"]["pep_species"] == "C. chinense" and out["traits"]["height"] == 70
+    assert out["description"].startswith("Orange Habanero")  # leer in der ersten Antwort
+    nach = Fake.calls[2]["body"]["messages"][2]["content"][0]["text"]
+    assert "(Chili)" in nach and "- pep_scoville:" in nach and "- description:" in nach and "- tom_" not in nach
+    assert "- species:" not in nach and "- pep_fruit_color:" not in nach
+    assert {t["name"]: t["max_uses"] for t in Fake.calls[2]["body"]["tools"]} == {"web_search": 3, "web_fetch": 2}
+    scov = next(m for m in out["trait_meta"] if m["key"] == "pep_scoville")
+    assert scov["text"] == "225.000 SHU"
+
+    # Scheitert die Nachfrage, bleibt die erste Antwort
+    Fake.calls.clear()
+    orig = research._turn
+    n = {"calls": 0}
+
+    def flaky(body, key, usage):
+        n["calls"] += 1
+        if n["calls"] == 2:
+            raise research.BusyError("überlastet")
+        return orig(body, key, usage)
+    research._turn = flaky
+    try:
+        out = client.post("/api/research/variety", json={"name": "Habanero Orange"}).json()
+    finally:
+        research._turn = orig
+    assert out["rounds"] == 1 and out["follow_up_error"] == "überlastet" and "pep_scoville" not in out["traits"]
+    assert out["traits"]["height"] == 70
