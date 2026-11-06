@@ -20,6 +20,10 @@ SECTION_ORDER = {s: i for i, s in enumerate(bonitur.SECTIONS)}
 FRUIT_WEIGHT = {"tomato": "tom_fruit_weight", "pepper": "pep_fruit_weight"}
 SOURCE_TEXT = {"bonitur": "Bonitur", "internet": "Internet", "manual": "eigene Angabe"}
 MIGRATED_KEY = "profile_migrated"
+# Merkmale, die Händler meist angeben: fehlen sie nach der ersten Antwort, fragt die Recherche gezielt nach
+CORE = {"plant_size", "height", "fruit_size", "maturity_class", "days_to_maturity",
+        "tom_growth", "tom_fruit_weight", "tom_fruit_shape", "tom_fruit_color",
+        "pep_species", "pep_habit", "pep_fruit_weight", "pep_fruit_shape", "pep_fruit_color", "pep_pungency", "pep_scoville"}
 
 
 def in_profile(t: dict) -> bool:

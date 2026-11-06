@@ -67,6 +67,23 @@ class Fake(BaseHTTPRequestHandler):
                     {"type": "web_search_result", "url": f"{self.base}/shop/ochsenherz", "title": "Ochsenherz – Shop",
                      "encrypted_content": "x"}]}]})
         prompt = json.dumps(body["messages"][0]["content"], ensure_ascii=False)
+        if len(body["messages"]) >= 3:  # Nachfrage: nur die genannten fehlenden Angaben
+            asked = body["messages"][-1]["content"][-1]["text"]
+            extra = {k: v for k, v in FOLLOW.items() if f"- {k}:" in asked}
+            answer = {"traits": {k: v for k, v in extra.items() if k not in FOLLOW_FIELDS},
+                      **{k: v for k, v in extra.items() if k in FOLLOW_FIELDS},
+                      "sources": [{"url": f"{self.base}/shop/datenblatt", "title": "Datenblatt"}]}
+            return self._send(200, {"stop_reason": "end_turn", "usage": usage, "content": [
+                {"type": "server_tool_use", "id": "srv2", "name": "web_search", "input": {"query": "Scoville"}},
+                {"type": "text", "text": "Nachgetragen:\n```json\n" + json.dumps(answer, ensure_ascii=False) + "\n```"}]})
+        if "„Habanero Orange" in prompt:  # wie im Echten: Scoville fehlt in der ersten Antwort
+            answer = {"name": "Habanero Orange", "crop": "Chili", "species": "Capsicum chinense", "kind": "Habanero-Typ",
+                      "seed": "samenfest", "description": "", "confidence": "hoch",
+                      "traits": {"plant_size": "mittel", "height": "60–80 cm", "pep_fruit_color": "Orange",
+                                 "pep_pungency": "vorhanden"},
+                      "sources": [{"url": f"{self.base}/shop/habanero", "title": "Shop"}], "images": []}
+            return self._send(200, {"stop_reason": "end_turn", "usage": usage, "content": [
+                {"type": "text", "text": "```json\n" + json.dumps(answer, ensure_ascii=False) + "\n```"}]})
         named = "Ochsenherz" if ("„Ochsenherz" in prompt or '"type": "image"' in prompt) else "Unbekannte Sorte"
         answer = {"name": named, "crop": "Tomate", "species": "Solanum lycopersicum", "kind": "Fleischtomate",
                   "seed": "samenfest", "supplier": "", "description": "Große, herzförmige Früchte.",
@@ -81,6 +98,12 @@ class Fake(BaseHTTPRequestHandler):
         return self._send(200, {"stop_reason": "end_turn", "usage": usage, "content": [
             {"type": "text", "text": "Hier das Ergebnis:\n```json\n" + json.dumps(answer, ensure_ascii=False) + "\n```"}]})
 
+
+# Was die Nachfrage findet, wenn danach gefragt wird
+FOLLOW = {"pep_scoville": "100.000–350.000 SHU", "pep_fruit_weight": "8 g", "pep_species": "C. chinense",
+          "pep_fruit_shape": "herzförmig", "tom_locules": "5–6", "tom_brix": "5,5",
+          "description": "Orange Habanero mit fruchtigem Aroma und sehr hoher Schärfe."}
+FOLLOW_FIELDS = {"species", "kind", "seed", "description"}
 
 
 def serve(port: int = 0):

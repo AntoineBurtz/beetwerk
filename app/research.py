@@ -16,7 +16,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from html import unescape
-from typing import Optional
+from typing import Callable, Optional
 
 from . import db
 
@@ -172,12 +172,84 @@ def _prompt(name: str, crop: str, crops: list[str], hint: str, with_image: bool,
         "Unbekannte Werte als leerer Text."
     )
     if traits:
-        parts.append(
-            "Merkmale für traits. Klassen und Zahlen sind getrennte Felder: schreibe in ein Klassen-Feld nur die "
-            "Klasse (z. B. plant_size „groß“) und in das Zahlen-Feld nur die Zahl ohne Einheit (z. B. height 180). "
-            "Bei Spannen wie „150–200 cm“ die Mitte (175). Rechne Einheiten um, wenn nötig (1 m = 100 cm). "
-            "Lass ein Merkmal weg, wenn du es nicht belegen kannst.\n" + _trait_lines(traits))
+        first = "" if crop else ("Bestimme zuerst die Kultur und fülle dann die allgemeinen Merkmale und die der passenden "
+                                 "Kultur; Merkmale einer anderen Kultur lässt du weg. ")
+        parts.append("Merkmale für traits. " + first + RULES + "\n" + _trait_lines(traits))
     return "\n\n".join(parts)
+
+
+RULES = ("Klassen und Zahlen sind getrennte Felder: schreibe in ein Klassen-Feld nur die Klasse (z. B. plant_size „groß“) "
+         "und in das Zahlen-Feld nur die Zahl ohne Einheit (z. B. height 180). Bei Spannen wie „150–200 cm“ die Mitte (175). "
+         "Rechne Einheiten um, wenn nötig (1 m = 100 cm). Lass ein Merkmal weg, wenn du es nicht belegen kannst.")
+
+FOLLOW_FIELDS = {
+    "species": "botanische Art",
+    "kind": "Typ, z. B. Fleischtomate oder Habanero-Typ",
+    "seed": "„samenfest“ oder „F1-Hybride“",
+    "description": "zwei bis vier Sätze zu Frucht, Geschmack, Verwendung, Herkunft",
+}
+
+
+def _follow_prompt(name: str, crop: str, traits: list[dict], fields: list[str]) -> str:
+    """Zweite Runde: gezielt nach dem suchen, was in der ersten Antwort fehlt."""
+    examples = ", ".join(f"„{name} {t['name']}“" for t in traits[:3])
+    parts = [f"Für „{name}“" + (f" ({crop})" if crop else "") + " fehlen noch Angaben. Suche gezielt danach"
+             + (f", z. B. {examples}," if examples else "") + " auch in Datenblättern von Saatgut-Händlern, "
+             "und prüfe die Seiten, die du schon gefunden hast. Erfinde nichts: Was du nicht belegen kannst, lässt du weg."]
+    if fields:
+        parts.append("Fehlende Angaben:\n" + "\n".join(f"- {k}: {FOLLOW_FIELDS[k]}" for k in fields))
+    if traits:
+        parts.append("Fehlende Merkmale für traits. " + RULES + "\n" + _trait_lines(traits))
+    parts.append("Antworte zum Schluss mit genau einem JSON-Objekt in einem ```json-Block, nur mit den neu belegten Werten: "
+                 "{" + ", ".join(f'"{k}": …' for k in fields) + (", " if fields else "")
+                 + '"traits": {Schlüssel: Wert}, "sources": [{"url": …, "title": …}]}')
+    return "\n\n".join(parts)
+
+
+def _turn(body: dict, key: str, usage: dict) -> list:
+    """Eine Antwort von Claude; die Websuche kann sie unterbrechen (pause_turn), dann geht es weiter."""
+    messages = body["messages"]
+    blocks: list = []
+    for _ in range(4):
+        res = _claude(body, key)
+        u = res.get("usage") or {}
+        usage["input_tokens"] += u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
+        usage["output_tokens"] += u.get("output_tokens", 0)
+        for k in ("web_search_requests", "web_fetch_requests"):
+            usage[k] += (u.get("server_tool_use") or {}).get(k, 0)
+        blocks += res.get("content") or []
+        if res.get("stop_reason") != "pause_turn":
+            if res.get("stop_reason") == "refusal":
+                raise ResearchError("Claude hat die Anfrage abgelehnt")
+            break
+        body = {**body, "messages": messages + [{"role": "assistant", "content": blocks}]}
+    return blocks
+
+
+def _text(blocks: list) -> str:
+    # Mit Quellenangaben teilt Claude den Text in mehrere Blöcke; sie gehören ohne Trenner zusammen
+    return "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+
+
+def _hits(blocks: list) -> list[dict]:
+    found = []
+    for b in blocks:
+        if b.get("type") == "web_search_tool_result" and isinstance(b.get("content"), list):
+            found += [{"url": r.get("url"), "title": r.get("title", "")} for r in b["content"] if r.get("url")]
+    return found
+
+
+def _sources(data: dict) -> list[dict]:
+    return [{"url": x["url"], "title": str(x.get("title") or "")[:200]}
+            for x in (data.get("sources") or []) if isinstance(x, dict) and _http(x.get("url"))]
+
+
+def _tools(searches: int, fetches: int) -> list[dict]:
+    return [
+        {"type": "web_search_20250305", "name": "web_search", "max_uses": searches,
+         "user_location": {"type": "approximate", "country": "DE", "timezone": "Europe/Berlin"}},
+        {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": fetches, "max_content_tokens": 8000},
+    ]
 
 
 def _parse_json(text: str) -> dict:
@@ -194,8 +266,13 @@ def _parse_json(text: str) -> dict:
 
 
 def research(name: str, crop: str = "", crops: Optional[list[str]] = None, hint: str = "",
-             image: Optional[dict] = None, traits: Optional[list[dict]] = None, images: bool = True) -> dict:
-    """Recherchiert eine Sorte. image: {"data": base64, "media_type": "image/jpeg"} (Samentütchen)."""
+             image: Optional[dict] = None, traits: Optional[list[dict]] = None, images: bool = True,
+             more: Optional[Callable[[dict], Optional[dict]]] = None) -> dict:
+    """Recherchiert eine Sorte. image: {"data": base64, "media_type": "image/jpeg"} (Samentütchen).
+
+    more(out) sagt nach der ersten Antwort, was noch fehlt ({"crop", "traits", "fields"} oder None);
+    dann fragt Beetwerk in derselben Unterhaltung gezielt nach, damit alles in einem Schritt gefüllt ist.
+    """
     s = settings()
     if not s["api_key"]:
         raise FatalResearchError("Für die Recherche fehlt der API-Schlüssel (Einstellungen → KI-Recherche)")
@@ -208,44 +285,44 @@ def research(name: str, crop: str = "", crops: Optional[list[str]] = None, hint:
                                                     "data": image["data"]}})
     content.append({"type": "text", "text": _prompt(name, crop, crops or [], hint.strip(), bool(image), traits or [])})
     messages = [{"role": "user", "content": content}]
-    body = {
-        "model": s["model"], "max_tokens": 4000, "system": SYSTEM, "messages": messages,
-        "tools": [
-            {"type": "web_search_20250305", "name": "web_search", "max_uses": 5,
-             "user_location": {"type": "approximate", "country": "DE", "timezone": "Europe/Berlin"}},
-            {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 2, "max_content_tokens": 8000},
-        ],
-    }
+    body = {"model": s["model"], "max_tokens": 8000, "system": SYSTEM, "messages": messages, "tools": _tools(5, 2)}
     usage = {"input_tokens": 0, "output_tokens": 0, "web_search_requests": 0, "web_fetch_requests": 0}
-    blocks: list = []
-    for _ in range(4):  # Websuche kann die Antwort unterbrechen (pause_turn), dann weitermachen
-        res = _claude(body, s["api_key"])
-        u = res.get("usage") or {}
-        usage["input_tokens"] += u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
-        usage["output_tokens"] += u.get("output_tokens", 0)
-        for k in ("web_search_requests", "web_fetch_requests"):
-            usage[k] += (u.get("server_tool_use") or {}).get(k, 0)
-        blocks += res.get("content") or []
-        if res.get("stop_reason") != "pause_turn":
-            if res.get("stop_reason") == "refusal":
-                raise ResearchError("Claude hat die Anfrage abgelehnt")
-            break
-        body = {**body, "messages": messages + [{"role": "assistant", "content": res.get("content") or []}]}
-    # Mit Quellenangaben teilt Claude den Text in mehrere Blöcke; sie gehören ohne Trenner zusammen
-    text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
-    data = _parse_json(text)
+    blocks = _turn(body, s["api_key"], usage)
+    data = _parse_json(_text(blocks))
+    found = _hits(blocks)  # Treffer der Websuche als Rückfall für Quellen und Bilder
 
-    found = []  # Treffer der Websuche als Rückfall für Quellen und Bilder
-    for b in blocks:
-        if b.get("type") == "web_search_tool_result" and isinstance(b.get("content"), list):
-            found += [{"url": r.get("url"), "title": r.get("title", "")} for r in b["content"] if r.get("url")]
     out = {k: str(data.get(k) or "").strip() for k in FIELDS}
     out["confidence"] = str(data.get("confidence") or "").strip()
-    out["traits"] = data.get("traits") if isinstance(data.get("traits"), dict) else {}
-    sources = [x for x in (data.get("sources") or []) if isinstance(x, dict) and _http(x.get("url"))]
-    if not sources:
-        sources = found[:5]
-    out["sources"] = [{"url": x["url"], "title": str(x.get("title") or "")[:200]} for x in sources[:5]]
+    out["traits"] = dict(data.get("traits")) if isinstance(data.get("traits"), dict) else {}
+    sources = _sources(data) or found[:5]
+    out["rounds"] = 1
+
+    ask = more(out) if more and out["confidence"] != "niedrig" else None
+    if ask and (ask.get("traits") or ask.get("fields")):
+        follow = _follow_prompt(out["name"] or name, ask.get("crop") or out["crop"] or crop, ask.get("traits") or [],
+                                [k for k in ask.get("fields") or [] if k in FOLLOW_FIELDS])
+        body2 = {**body, "tools": _tools(3, 2), "messages": messages + [
+            {"role": "assistant", "content": blocks}, {"role": "user", "content": [{"type": "text", "text": follow}]}]}
+        try:
+            blocks2 = _turn(body2, s["api_key"], usage)
+            extra = _parse_json(_text(blocks2))
+        except ResearchError as exc:  # die erste Antwort bleibt brauchbar
+            out["follow_up_error"] = str(exc)
+        else:
+            out["rounds"] = 2
+            for k in FOLLOW_FIELDS:
+                if not out[k] and str(extra.get(k) or "").strip():
+                    out[k] = str(extra[k]).strip()
+            if isinstance(extra.get("traits"), dict):
+                asked = {t["key"] for t in ask.get("traits") or []}  # fehlte oder war unbrauchbar (z. B. „viele“)
+                for k, v in extra["traits"].items():
+                    if v not in (None, "", []) and (k in asked or out["traits"].get(k) in (None, "", [])):
+                        out["traits"][k] = v
+            have = {x["url"] for x in sources}
+            sources += [x for x in _sources(extra) or _hits(blocks2)[:2] if x["url"] not in have]
+            found += _hits(blocks2)
+
+    out["sources"] = sources[:8]
     model_images = [u for u in (data.get("images") or []) if isinstance(u, str) and _http(u)][:4]
     out["images"] = image_candidates(out["name"] or name, out["species"], out["crop"] or crop,
                                      [x["url"] for x in out["sources"]] + [x["url"] for x in found[:3]],
