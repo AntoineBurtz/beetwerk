@@ -1327,3 +1327,87 @@ dialog.var-detail { width: min(720px, calc(100vw - 24px)); }
   .prof-grid { grid-template-columns: minmax(0, 1fr); }
   .prof-legend { margin-left: 0; }
 }
+
+/* ------------------------------------------------------------- Anzucht */
+
+.year-switch { display: inline-flex; align-items: center; gap: 2px; }
+.year-switch strong { font-size: 17px; min-width: 3.2em; text-align: center; }
+.link { all: unset; cursor: pointer; color: var(--leaf); text-decoration: underline; text-underline-offset: 2px; }
+.link:focus-visible { outline: 2px solid var(--leaf); outline-offset: 2px; }
+.nursery .note { display: flex; gap: 10px; align-items: start; padding: 10px 14px; border-radius: var(--r-m);
+  background: var(--surface); border: 1px solid var(--line); font-size: 14px; line-height: 1.45; }
+.nursery .note svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; margin-top: 1px; }
+.nursery .note.warn { background: var(--warn-soft); border-color: #e3c98a; }
+.nursery .note.bad { background: var(--alert-soft); border-color: #e6b3ae; }
+.nursery .note.bad > strong { color: var(--alert); font-size: 16px; line-height: 1.2; }
+.nursery h3.sub { margin: 0; font: 600 17px/1.2 var(--font-cond); letter-spacing: .02em; }
+
+.nweek { display: grid; gap: 6px; scroll-margin-top: 12px; }
+.nweek-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.nweek-head h3 { margin: 0; font: 600 18px/1.2 var(--font-cond); letter-spacing: .02em; }
+.nweek-count { margin-left: auto; }
+.nweek.now .tasks { border-color: var(--leaf); box-shadow: 0 0 0 1px var(--leaf); }
+.nweek.past .nweek-head h3 { color: var(--ink-2); }
+
+.ntask {
+  display: grid; grid-template-columns: 24px 82px 96px minmax(140px, 1.1fr) minmax(0, 2fr); gap: 4px 10px; align-items: center;
+  padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 14px;
+}
+.ntask:last-child { border-bottom: 0; }
+.ntask input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--leaf); }
+.ntask .date { color: var(--ink-2); white-space: nowrap; }
+.ntask .verb { font-weight: 600; white-space: nowrap; }
+.ntask.k-sow .verb { color: var(--leaf); }
+.ntask.k-handover .verb { color: #2d5577; }
+.ntask .what { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; font-weight: 500; min-width: 0; }
+.ntask .what span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ntask .what:hover span:last-child { text-decoration: underline; }
+.ntask .what:focus-visible { outline: 2px solid var(--leaf); outline-offset: 2px; border-radius: 3px; }
+.ntask .detail { color: var(--ink-2); min-width: 0; display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+.ntask.done { color: var(--ink-3); }
+.ntask.done .what, .ntask.done .detail { color: var(--ink-3); }
+.ntask.done .what span:last-child { text-decoration: line-through; }
+.ntask.overdue .date { color: var(--alert); font-weight: 600; }
+.src-short { background: var(--alert-soft); color: var(--alert); }
+
+.ntask.handover { grid-template-columns: 44px minmax(140px, 1.2fr) minmax(90px, .8fr) 130px minmax(0, 1.4fr); }
+.ntask.handover .count { font-size: 16px; text-align: right; }
+.ntask.handover.cancelled { color: var(--ink-3); }
+.ntask.handover.cancelled .what span:last-child { text-decoration: line-through; }
+.status-sel { min-height: 32px; padding: 2px 6px; font: inherit; font-size: 14px; border: 1px solid var(--line-strong);
+  border-radius: var(--r-s); background: #fff; color: var(--ink); }
+.people { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip.person { cursor: pointer; min-height: 32px; padding: 4px 12px; }
+
+.calc { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14.5px; line-height: 1.4; }
+.nursery-flags { display: flex; gap: 18px; flex-wrap: wrap; }
+.nursery-dates { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+table.occ { font-size: 13px; }
+table.occ th, table.occ td { padding: 6px 7px; }
+table.occ tbody th { text-align: left; font-weight: 500; white-space: nowrap; position: sticky; left: 0; background: var(--surface); z-index: 1; }
+table.occ th.now { color: var(--ink); box-shadow: inset 0 -3px 0 var(--signal); }
+table.occ td { position: relative; min-width: 34px; }
+table.occ td[style*="--fill"] { background: linear-gradient(to top, var(--leaf-soft) var(--fill), transparent var(--fill)); }
+table.occ td.zero { color: var(--ink-3); }
+table.occ td.over { background: var(--alert-soft); color: var(--alert); font-weight: 700; }
+
+@media (max-width: 760px) {
+  .tabs a { font-size: 11px; }
+  .tabs a svg { width: 20px; height: 20px; }
+  .ntask { grid-template-columns: 24px 78px minmax(0, 1fr); }
+  .ntask .what { grid-column: 2 / -1; }
+  .ntask .verb { grid-column: 3; grid-row: 1; }
+  .ntask .detail { grid-column: 2 / -1; font-size: 13px; }
+  .ntask.handover { grid-template-columns: 36px minmax(0, 1fr) auto; }
+  .ntask.handover .what { grid-column: 2; }
+  .ntask.handover .who { grid-column: 2; grid-row: 2; color: var(--ink-2); }
+  .ntask.handover .status-sel { grid-column: 3; grid-row: 1 / span 2; }
+  .ntask.handover .detail { grid-column: 2 / -1; }
+  .nursery-dates { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .nursery .page-head .seg { width: 100%; }
+  .nursery .page-head .seg label { flex: 1; justify-content: center; padding: 6px 4px; }
+  .nursery .seg-count { display: none; }
+}

@@ -7,12 +7,14 @@ import { mountPlantings } from "./plantings.js";
 import { mountCrops } from "./crops.js";
 import { mountWeather } from "./weatherpage.js";
 import { mountBonitur } from "./bonitur.js";
+import { mountNursery } from "./nursery.js";
 import { openSettings } from "./editor.js";
 
 const VIEWS = {
   karte: mountMap,
   zeitleiste: mountTimeline,
   saetze: mountPlantings,
+  anzucht: mountNursery,
   kulturen: mountCrops,
   wetter: mountWeather,
   bonitur: mountBonitur,

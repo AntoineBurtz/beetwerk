@@ -212,6 +212,7 @@ def session():
 
 
 def init_db() -> None:
+    from . import nursery
     from .bonitur import seed_traits
     from .profile import migrate_legacy
     from .seed import guess_trait_groups, seed_crops
@@ -235,6 +236,7 @@ def init_db() -> None:
             guess_trait_groups(conn)
         seed_traits(conn)
         migrate_legacy(conn)
+        nursery.init(conn)
 
 
 # Spalten, die nach der ersten Version dazugekommen sind

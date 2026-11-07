@@ -17,13 +17,13 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import baserow, bonitur, db, geo, profile, research, varieties, weather
+from . import baserow, bonitur, db, geo, nursery, profile, research, varieties, weather
 from .seed import guess_trait_groups, seed_demo
 
 VERSION = "1.1.0"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 IMAGE_PATH = db.DATA_DIR / "imagery" / "garden.jpg"
-INTERNAL_SETTINGS = {"geo", "imagery_custom", bonitur.SEEDED_KEY, profile.MIGRATED_KEY, *weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
+INTERNAL_SETTINGS = {"geo", "imagery_custom", bonitur.SEEDED_KEY, profile.MIGRATED_KEY, nursery.SEEDED_KEY, *weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
 # Nicht in die Sicherung: Abrufzustand und Zugangsdaten
 NOT_EXPORTED = {*weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
 
@@ -114,6 +114,17 @@ class CropIn(BaseModel):
     plant_spacing: Optional[int] = Field(None, ge=1, le=500)
     notes: Optional[str] = None
     trait_group: Optional[Literal["", "tomato", "pepper"]] = None  # Bonitur-Merkmale der Kultur
+    # Anzucht; bei den Verweisen heißt 0 „keins“
+    sow_container_id: Optional[int] = Field(None, ge=0)
+    pot_container_id: Optional[int] = Field(None, ge=0)
+    prick_days: Optional[int] = Field(None, ge=0, le=200)
+    seeds_per_cell: Optional[int] = Field(None, ge=1, le=50)
+    germination: Optional[int] = Field(None, ge=1, le=100)
+    reserve: Optional[int] = Field(None, ge=0, le=300)
+    warm: Optional[bool] = None
+    harden_days: Optional[int] = Field(None, ge=0, le=60)
+    place_id: Optional[int] = Field(None, ge=0)
+    grow_place_id: Optional[int] = Field(None, ge=0)
 
 
 class VarietyIn(BaseModel):
@@ -349,6 +360,7 @@ def all_data():
             "crops": db.rows(conn, "SELECT * FROM crops ORDER BY name"),
             "plantings": [_planting_out(p) for p in db.rows(conn, "SELECT * FROM plantings ORDER BY sow_date, id")],
             "varieties": [varieties.variety_out(v) for v in db.rows(conn, "SELECT * FROM varieties ORDER BY name COLLATE NOCASE")],
+            **nursery.lists(conn),
         }
 
 
@@ -384,10 +396,25 @@ def delete_bed(bed_id: int):
 
 # ---------------------------------------------------------------- Kulturen
 
+def _crop_refs(conn, record: dict) -> dict:
+    """Gefäße und Plätze der Anzucht: 0 heißt keins, sonst muss es sie geben."""
+    if "warm" in record:
+        record["warm"] = int(bool(record["warm"]))
+    for k, table, what in (("sow_container_id", "containers", "Dieses Gefäß"), ("pot_container_id", "containers", "Dieses Gefäß"),
+                           ("place_id", "places", "Diesen Anzuchtplatz"), ("grow_place_id", "places", "Diesen Anzuchtplatz")):
+        if k in record:
+            if not record[k]:
+                record[k] = None
+            elif conn.execute(f"SELECT 1 FROM {table} WHERE id = ?", (record[k],)).fetchone() is None:
+                _err(422, f"{what} gibt es nicht")
+    return record
+
+
 @app.post("/api/crops", status_code=201)
 def create_crop(body: CropIn):
     record = {**CROP_DEFAULTS, **body.model_dump(exclude_unset=True, exclude_none=True)}
     with db.session() as conn:
+        _crop_refs(conn, record)
         new_id = _insert(conn, "crops", record)
         return _get(conn, "crops", new_id)
 
@@ -397,6 +424,7 @@ def update_crop(crop_id: int, body: CropIn):
     changes = body.model_dump(exclude_unset=True, exclude_none=True)
     with db.session() as conn:
         _get(conn, "crops", crop_id)
+        _crop_refs(conn, changes)
         _update(conn, "crops", crop_id, changes)
         return _get(conn, "crops", crop_id)
 
@@ -411,6 +439,10 @@ def delete_crop(crop_id: int):
         listed = conn.execute("SELECT COUNT(*) FROM varieties WHERE crop_id = ?", (crop_id,)).fetchone()[0]
         if listed:
             _err(409, f"Zu dieser Kultur stehen noch {listed} {'Sorte' if listed == 1 else 'Sorten'} in der Sortenliste")
+        wished = conn.execute("SELECT COUNT(*) FROM handovers WHERE crop_id = ?", (crop_id,)).fetchone()[0]
+        if wished:
+            _err(409, f"Für diese Kultur gibt es noch {wished} {'Wunsch' if wished == 1 else 'Wünsche'} von Freunden")
+        conn.execute("DELETE FROM nursery WHERE crop_id = ?", (crop_id,))
         bonitur._forget(conn, "crops", _get(conn, "crops", crop_id))
         conn.execute("DELETE FROM crops WHERE id = ?", (crop_id,))
     return Response(status_code=204)
@@ -510,6 +542,7 @@ def export_all():
     with db.session() as conn:
         data["settings"] = {k: v for k, v in _settings(conn).items() if k not in NOT_EXPORTED}
         data.update(bonitur.export_tables(conn))
+        data.update(nursery.export_tables(conn))
     data.pop("geo", None)
     data.pop("imagery", None)
     data["format"] = "beetwerk"
@@ -528,6 +561,7 @@ async def import_all(request: Request):
         _err(400, "Das ist keine Beetwerk-Sicherung")
     with db.session() as conn:
         bonitur.clear_tables(conn)
+        nursery.clear_tables(conn)
         conn.execute("DELETE FROM plantings")
         conn.execute("DELETE FROM beds")
         conn.execute("DELETE FROM varieties")
@@ -539,7 +573,7 @@ async def import_all(request: Request):
             if key in NOT_EXPORTED:
                 continue
             conn.execute("INSERT INTO settings(key, value) VALUES (?, ?)", (key, str(value)))
-        for table in ("crops", "varieties", "beds", "plantings"):
+        for table in ("containers", "places", "crops", "varieties", "beds", "plantings", *nursery.BACKUP_TABLES[2:]):
             cols = {r["name"] for r in db.rows(conn, f"PRAGMA table_info({table})")}
             for item in data.get(table) or []:
                 record = {k: v for k, v in item.items() if k in cols}
@@ -557,6 +591,7 @@ async def import_all(request: Request):
             guess_trait_groups(conn)  # ältere Sicherung ohne Bonitur-Zuordnung
         bonitur.import_tables(conn, data)
         profile.migrate_legacy(conn)  # ältere Sicherung mit Wuchs, Fruchtfarbe und Reife als Freitext
+        nursery.seed(conn)  # ältere Sicherung ohne Anzucht: Gefäße und Richtwerte
         for key, value in {**db.DEFAULT_SETTINGS, **keep}.items():
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
     return all_data()
@@ -666,4 +701,5 @@ def delete_garden_geo():
 app.include_router(bonitur.router)
 app.include_router(baserow.router)
 app.include_router(varieties.router)
+app.include_router(nursery.router)
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

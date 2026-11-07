@@ -22,6 +22,7 @@ Dazu gibt es:
 - Bonitur: Pflanzen einzeln oder als Block bewerten, mit BBCH-Bildern, Merkmalen nach UPOV für Tomate und Paprika/Chili, Sortenvergleich und CSV-Export.
 - Sortenliste mit Foto, Quellen und Merkmalen: nach der Saison aus deiner Bonitur, bis dahin aus dem Internet; neue Samen recherchiert Claude im Netz (auch vom Foto des Samentütchens).
 - Abgleich mit Baserow: Kulturen, Sorten, Sätze und die Bonitur landen in deiner Baserow-Datenbank.
+- Anzucht: Wochenplan zum Aussäen, Pikieren, Abhärten und Auspflanzen, aus den Sätzen gerechnet – mit Keimrate, Reserve, Gefäßen, Platz in der Anzucht und den Pflanzen, die Freunde bekommen.
 
 ## Wetter und Gießen
 
@@ -149,6 +150,18 @@ Die Karten der Sortenliste zeigen die wichtigsten Merkmale („Pflanze groß · 
 
 Dafür braucht es einen API-Schlüssel aus der [Claude Console](https://console.anthropic.com/), einzutragen unter Einstellungen → KI-Recherche. Der Schlüssel bleibt auf deinem Server und steht nicht in der Sicherung. Abgerechnet wird je Nutzung: die Websuche kostet 1 Cent je Suchanfrage (höchstens fünf je Sorte), dazu kommen die Tokens. Jede Recherche zeigt, wie viele Suchen und Tokens sie gebraucht hat. Der Server braucht dafür Internet.
 
+## Anzucht
+
+Die Seite **Anzucht** rechnet aus der Beetplanung, was wann gesät werden muss. Grundlage sind alle Sätze mit „Anzucht und Pflanzung“: Die Pflanzenzahl kommt aus der Beetbelegung bzw. den Anzahlen im Mischsatz. Ändert sich die Planung, rechnet die Anzucht neu. Eine **Anzucht** fasst alles zusammen, was von einer Kultur und Sorte am selben Tag gesät wird.
+
+- **Rechnung:** Bedarf (Beete + Freunde) plus Reserve der Kultur (Standard 20 %) ergibt die Jungpflanzen. Daraus mit der Keimrate die Körner: bei Breitsaat in die Saatschale so viele, dass genug keimen; bei Zellen und Töpfen so viele Zellen, dass in genug davon mindestens ein Korn aufgeht (bei 2 Körnern je Zelle und 80 % Keimrate also 96 % der Zellen). Mehr als ein Korn je Zelle passt auch für Horste wie Basilikum.
+- **Wochenplan:** je Kalenderwoche Aussäen, Pikieren, Abhärten, Auspflanzen und Abgeben, zum Abhaken. „Gesät“ überträgt sich auf die Sätze (ein Mischsatz ist gesät, wenn alle seine Sorten gesät sind), Auspflanzen ist das Häkchen des Satzes, Abgeben setzt den Wunsch auf „abgeholt“. Beim Öffnen springt die Seite zur aktuellen Woche.
+- **Anzuchten:** Tabelle mit Aussaat, Bedarf, Jungpflanzen, Körnern, Gefäß und Platz. Im Dialog trägst du ein, was wirklich gesät wurde und wie viele Jungpflanzen da sind; fehlen Pflanzen für den Bedarf, steht das oben im Wochenplan.
+- **Abgaben an Freunde:** Person, Kultur, Sorte (leer = egal), Anzahl, Abholtermin und Stand (gewünscht, zugesagt, abgeholt, abgesagt). Die Pflanzen laufen in der Anzucht derselben Sorte mit, wenn deren Pflanztermin höchstens zwei Wochen nach und vier Wochen vor der Abholung liegt; bei offener Sorte in der größten passenden. Passt keine, bekommt der Wunsch eine eigene Anzucht (Abholung minus Anzuchtdauer). Die Abholliste ist nach Termin sortiert.
+- **Plätze und Belegung:** Lege deine Anzuchtplätze mit Plattenplätzen an (ein Plattenplatz ist eine Standardplatte, etwa 30 × 50 cm). Die Belegung zeigt je Woche, wie viele Plattenplätze belegt sind, bis die Pflanzen zum Abhärten rausgehen; zu volle Wochen sind rot und stehen oben im Wochenplan.
+- **Gefäße:** Saatschale (Körner je Schale), Multitopfplatten (Zellen je Platte) und Töpfe, jeweils mit „je Plattenplatz“ (z. B. 15 Töpfe 9 cm). Sechs gängige sind angelegt.
+- **Kulturen:** Im Dialog einer Kultur mit Anzucht stehen Aussaatgefäß, Pikieren (Gefäß und nach wie vielen Tagen), Körner je Zelle, Keimrate, Reserve, Abhärten, Wärme und Anzuchtplatz. Für die mitgelieferten Kulturen gibt es Richtwerte, z. B. Tomate: Saatschale, nach 14 Tagen in Töpfe 9 cm pikieren, warm; Salat: Multitopfplatte 104, kühl.
+
 ## Grundstück auf dem Luftbild
 
 Unter **Einstellungen → Grundstück** oder in der Seitenleiste der Karte. Die Einrichtung läuft in vier Schritten:
@@ -261,7 +274,7 @@ BEETWERK_DATA=./data uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 Die REST-API ist unter `/api/docs` dokumentiert. Wichtige Endpunkte:
 
-- `GET /api/data` liefert Einstellungen, Beete, Kulturen und Sätze.
+- `GET /api/data` liefert Einstellungen, Beete, Kulturen, Sätze, Sorten sowie Gefäße, Anzuchtplätze, Freunde und ihre Wünsche.
 - `POST/PATCH/DELETE /api/beds`, `/api/crops`, `/api/plantings`
 - `GET /api/export`, `POST /api/import` für JSON-Sicherungen
 - `POST /api/demo?replace=true` lädt den Beispielgarten
@@ -280,6 +293,8 @@ Bonitur:
 - `GET/POST/PATCH/DELETE /api/varieties` Sortenliste, `POST /api/varieties/collect` übernimmt Sorten aus den Sätzen
 - `GET /api/varieties/{id}/profile` Merkmale einer Sorte mit Herkunft (Bonitur, Internet, eigene Angabe), `GET /api/varieties/profiles` die Kurzfassung für alle
 - `POST /api/research/variety` recherchiert eine Sorte (`{"name", "crop_id", "hint", "image"}`), `POST /api/research/batch` (`{"ids": [...]}`) mehrere im Hintergrund, `GET /api/research/batch` zeigt den Stand, `POST /api/photos/from-url` holt ein Bild
+- `GET /api/nursery?year=2027` Anzuchten, Wochenaufgaben und Belegung; `PATCH /api/nursery` (`{"key", "sown_done", "seeds_sown", "plants_raised", …}`) hält fest, was passiert ist
+- `POST/PATCH/DELETE /api/containers`, `/api/places`, `/api/people`, `/api/handovers` für Gefäße, Anzuchtplätze, Freunde und ihre Wünsche
 - `GET /api/baserow` Zustand des Abgleichs, `POST /api/baserow/sync` gleicht sofort ab, `POST /api/baserow/setup` bzw. `/connect` richten ein, `DELETE /api/baserow` trennt
 
 Ein Mischsatz trägt `varieties` (Liste aus `{"name", "count", "ref"}`), `fill` (`snake` oder `columns`) und `fill_start` (`tl`, `tr`, `bl`, `br`). Eine leere Liste macht ihn wieder zum normalen Satz mit `variety`.
@@ -303,6 +318,7 @@ Aufbau:
 - `app/seed.py`: Kulturen und Beispielgarten
 - `app/geo.py`: Koordinaten zwischen Grundstück und Erde, Luftbild-Abruf
 - `app/bonitur.py`: Merkmalkatalog, Einzelpflanzen, Boniturwerte, Fotos und CSV
+- `app/nursery.py`: Anzucht – Rechnung aus Sätzen und Wünschen, Wochenaufgaben, Belegung, Gefäße, Plätze, Freunde
 - `app/varieties.py`, `app/profile.py` und `app/research.py`: Sortenliste, Sortenprofil aus Bonitur und Recherche, Recherche mit Claude (`tests/fakeclaude.py` ist eine künstliche Claude-Schnittstelle samt Commons und Shop für Tests: `python tests/fakeclaude.py 8794`, Schlüssel `sk-test`)
 - `app/baserow.py`: Einrichtung und Abgleich mit Baserow (`tests/fakebaserow.py` ist ein künstliches Baserow für Tests: `python tests/fakebaserow.py 8793`, Anmeldung `garten@example.org` / `geheim`)
 - `app/static/`: Oberfläche ohne Build-Schritt, reines JavaScript mit ES-Modulen (`map.js` Beetkarte, `timeline.js` Zeitleiste, `plantings.js` Sätze und Aufgaben, `editor.js` Dialoge, `geosetup.js` Grundstück auf dem Luftbild, `bonitur.js` Bonitur mit `bstore.js` und `bwidgets.js`, `store.js` Zustand und Rückgängig)
