@@ -408,7 +408,6 @@ export function openBedEditor(bed, defaults = {}) {
         x: num(x.value) ?? 0,
         y: num(y.value) ?? 0,
         notes: notes.value,
-        trait_group: traitGroup.value,
       };
       if (!payload.name) throw new Error("Bitte einen Namen eingeben");
       if (!(payload.length > 0) || !(payload.width > 0)) throw new Error("Länge und Breite müssen größer als 0 sein");
@@ -471,6 +470,43 @@ export function openCropEditor(crop) {
     [["", "nur allgemeine Merkmale"], ["tomato", "Tomate"], ["pepper", "Paprika und Chili"]]
       .map(([k, label]) => h("option", { value: k, selected: (c.trait_group || "") === k }, label)));
 
+  // Anzucht: Gefäße, Pikieren, Keimrate, Reserve, Platz
+  const contSel = (current, none) => h("select", {},
+    h("option", { value: "0", selected: !current }, none),
+    state.containers.map((x) => h("option", { value: x.id, selected: current === x.id }, x.name)));
+  const placeSel = (current, none) => h("select", {},
+    h("option", { value: "0", selected: !current }, none),
+    state.places.map((x) => h("option", { value: x.id, selected: current === x.id }, `${x.name}${x.warm ? " (warm)" : ""}`)));
+  const sowCont = contSel(c.sow_container_id, "– kein Gefäß –");
+  const potCont = contSel(c.pot_container_id, "nicht pikieren");
+  const prickDays = h("input", { inputmode: "numeric", value: c.prick_days ?? 0 });
+  const seedsPer = h("input", { inputmode: "numeric", value: c.seeds_per_cell ?? 1 });
+  const germ = h("input", { inputmode: "numeric", value: c.germination ?? 80 });
+  const reserve = h("input", { inputmode: "numeric", value: c.reserve ?? 20 });
+  const hardenDays = h("input", { inputmode: "numeric", value: c.harden_days ?? 7 });
+  const warm = h("input", { type: "checkbox", checked: !!c.warm });
+  const placeIn = placeSel(c.place_id, "– kein Platz –");
+  const growIn = placeSel(c.grow_place_id, "wie bei der Aussaat");
+  const nurseryBox = h("fieldset", {},
+    h("legend", {}, "Anzucht"),
+    h("div", { class: "grid-2" }, field("Aussaat in", sowCont), field("Pikieren in", potCont)),
+    h("div", { class: "grid-3" },
+      field("Pikieren nach", prickDays, "Tagen ab Aussaat"),
+      field("Körner je Zelle", seedsPer, "mehr als 1: Horst oder vereinzeln"),
+      field("Keimrate", germ, "in %")),
+    h("div", { class: "grid-3" },
+      field("Reserve", reserve, "in %, für Ausfälle"),
+      field("Abhärten", hardenDays, "Tage vor der Pflanzung"),
+      h("label", { class: "check", style: { alignSelf: "end", minHeight: "38px" } }, warm, "braucht Wärme zum Keimen")),
+    state.places.length ? h("div", { class: "grid-2" }, field("Anzuchtplatz", placeIn), field("Platz nach dem Pikieren", growIn)) : null);
+  const paintNursery = () => {
+    nurseryBox.hidden = method.value !== "transplant";
+    prickDays.disabled = potCont.value === "0";
+  };
+  method.addEventListener("change", paintNursery);
+  potCont.addEventListener("change", paintNursery);
+  paintNursery();
+
   const ui = shell(isNew ? "Neue Kultur" : c.name, {
     onSubmit: async () => {
       const intOf = (el, label, min = 0) => {
@@ -491,6 +527,16 @@ export function openCropEditor(crop) {
         notes: notes.value,
         trait_group: traitGroup.value,
       };
+      if (method.value === "transplant") {
+        Object.assign(payload, {
+          sow_container_id: Number(sowCont.value), pot_container_id: Number(potCont.value),
+          prick_days: intOf(prickDays, "Pikieren nach"), seeds_per_cell: intOf(seedsPer, "Körner je Zelle", 1),
+          germination: intOf(germ, "Keimrate", 1), reserve: intOf(reserve, "Reserve"), harden_days: intOf(hardenDays, "Abhärten"),
+          warm: warm.checked,
+        });
+        if (payload.germination > 100) throw new Error("Keimrate: höchstens 100 %");
+        if (state.places.length) Object.assign(payload, { place_id: Number(placeIn.value), grow_place_id: Number(growIn.value) });
+      }
       if (!payload.name) throw new Error("Bitte einen Namen eingeben");
       if (isNew) await create("crops", payload);
       else await patch("crops", c.id, payload, { silent: true });
@@ -509,6 +555,7 @@ export function openCropEditor(crop) {
     h("fieldset", {},
       h("legend", {}, "Abstände in cm"),
       h("div", { class: "grid-2" }, field("Reihenabstand", rowSp), field("Pflanzabstand in der Reihe", plantSp))),
+    nurseryBox,
     field("Bonitur-Merkmale", traitGroup, "Welche Merkmale die Bonitur für diese Kultur anbietet"),
     field("Notizen", notes),
   );

@@ -42,6 +42,10 @@ export const state = {
   crops: [],
   plantings: [],
   varieties: [], // Sortenliste
+  containers: [], // Anzuchtgefäße
+  places: [], // Anzuchtplätze
+  people: [], // Freunde, die Jungpflanzen bekommen
+  handovers: [], // ihre Wünsche
   day: initialDay(),
   sel: null, // { type: "bed" | "planting", id }
   // Modus der Karte: Kultur setzen, Satz ohne Beet zuweisen oder neue Fläche aufziehen
@@ -72,9 +76,13 @@ export const find = {
   crop: (id) => state.crops.find((c) => c.id === id),
   planting: (id) => state.plantings.find((p) => p.id === id),
   variety: (id) => state.varieties.find((v) => v.id === id),
+  container: (id) => state.containers.find((c) => c.id === id),
+  place: (id) => state.places.find((p) => p.id === id),
+  person: (id) => state.people.find((p) => p.id === id),
 };
 
-const LIST = { beds: "beds", crops: "crops", plantings: "plantings", varieties: "varieties" };
+const LIST = { beds: "beds", crops: "crops", plantings: "plantings", varieties: "varieties",
+  containers: "containers", places: "places", people: "people", handovers: "handovers" };
 
 export async function load() {
   const data = await api.get("/api/data");
@@ -112,6 +120,7 @@ export async function create(kind, data, { undoLabel } = {}) {
     state[LIST[kind]].push(item);
     if (kind === "crops") state.crops.sort((a, b) => a.name.localeCompare(b.name, "de"));
     if (kind === "varieties") state.varieties.sort((a, b) => a.name.localeCompare(b.name, "de"));
+    if (kind === "people") state.people.sort((a, b) => a.name.localeCompare(b.name, "de"));
     emit("data");
     if (undoLabel) pushUndo({ type: "create", kind, id: item.id, label: undoLabel });
     return item;
@@ -154,6 +163,13 @@ export async function remove(kind, id, { undoLabel } = {}) {
     const [gone] = list.splice(idx, 1);
     if (kind === "beds") {
       for (const p of state.plantings) if (p.bed_id === id) p.bed_id = null;
+    }
+    if (kind === "people") state.handovers = state.handovers.filter((x) => x.person_id !== id);
+    if (kind === "places") {
+      for (const c of state.crops) {
+        if (c.place_id === id) c.place_id = null;
+        if (c.grow_place_id === id) c.grow_place_id = null;
+      }
     }
     if (state.sel && state.sel.id === id) state.sel = null;
     emit("data");

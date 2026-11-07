@@ -182,7 +182,8 @@ export function mountPlantings(root) {
     }
     const list = [...groups.values()].sort((a, b) => (a.c?.name || "").localeCompare(b.c?.name || "", "de") || a.variety.localeCompare(b.variety, "de"));
     const head = h("div", { class: "section-head" }, h("h2", {}, `Bedarf ${year}`),
-      h("span", { class: "muted small" }, "Nach Aussaatjahr. Jungpflanzen mit 20 % Reserve gerechnet."));
+      h("span", { class: "muted small" }, "Nach Aussaatjahr. Jungpflanzen mit der Reserve der Kultur, ohne Pflanzen für Freunde – die plant die ",
+        h("a", { href: "#anzucht" }, "Anzucht"), " mit."));
     if (!list.length) return h("section", { class: "section" }, head, h("div", { class: "empty-note" }, "Noch keine Sätze mit Aussaat in diesem Jahr."));
     const table = h("table", { class: "data" },
       h("thead", {}, h("tr", {},
@@ -195,7 +196,7 @@ export function mountPlantings(root) {
         h("td", { class: "r nowrap" }, `${fmtNum(g.area)} m²`),
         h("td", { class: "r nowrap" }, `${fmtNum(g.meters)} m`),
         h("td", { class: "r" }, g.plants),
-        h("td", { class: "r" }, g.transplant ? Math.ceil(g.transplant * 1.2) : h("span", { class: "muted" }, "–"))))));
+        h("td", { class: "r" }, g.transplant ? Math.ceil(g.transplant * (1 + (g.c?.reserve ?? 20) / 100)) : h("span", { class: "muted" }, "–"))))));
     return h("section", { class: "section" }, head, h("div", { class: "table-wrap" }, table));
   }
 
