@@ -328,6 +328,7 @@ export function openPlantingEditor(planting, defaults = {}) {
   const issueList = isNew ? [] : issuesOf(p.id);
 
   ui.body.append(
+    p.goal_id && !isNew ? h("p", { class: "note-inline" }, "Dieser Satz gehört zu einem Ernteziel. Termine und Größe passt das Ziel an, wenn du es änderst – solange der Satz noch nicht gesät ist. Beet und Lage bleiben.") : null,
     h("div", { class: "grid-2" }, field("Kultur", cropSel),
       h("div", { class: "field" }, h("span", { id: "pl-variety-label" }, "Sorte"), variety, mixSummary,
         h("label", { class: "check" }, mixedChk, "Mehrere Sorten (Mischsatz)")),

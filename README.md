@@ -23,6 +23,7 @@ Dazu gibt es:
 - Sortenliste mit Foto, Quellen und Merkmalen: nach der Saison aus deiner Bonitur, bis dahin aus dem Internet; neue Samen recherchiert Claude im Netz (auch vom Foto des Samentütchens).
 - Abgleich mit Baserow: Kulturen, Sorten, Sätze und die Bonitur landen in deiner Baserow-Datenbank.
 - Anzucht: Wochenplan zum Aussäen, Pikieren, Abhärten und Auspflanzen, aus den Sätzen gerechnet – mit Keimrate, Reserve, Gefäßen, Platz in der Anzucht und den Pflanzen, die Freunde bekommen.
+- Ernteziele: „6 Köpfe Salat je Woche von Mitte Mai bis Oktober“ – Beetwerk legt die Folgesätze rückwärts an, mit längerer Kulturdauer im Frühjahr und Herbst, und schlägt freie Beete vor.
 
 ## Wetter und Gießen
 
@@ -162,6 +163,18 @@ Die Seite **Anzucht** rechnet aus der Beetplanung, was wann gesät werden muss. 
 - **Gefäße:** Saatschale (Körner je Schale), Multitopfplatten (Zellen je Platte) und Töpfe, jeweils mit „je Plattenplatz“ (z. B. 15 Töpfe 9 cm). Sechs gängige sind angelegt.
 - **Kulturen:** Im Dialog einer Kultur mit Anzucht stehen Aussaatgefäß, Pikieren (Gefäß und nach wie vielen Tagen), Körner je Zelle, Keimrate, Reserve, Abhärten, Wärme und Anzuchtplatz. Für die mitgelieferten Kulturen gibt es Richtwerte, z. B. Tomate: Saatschale, nach 14 Tagen in Töpfe 9 cm pikieren, warm; Salat: Multitopfplatte 104, kühl.
 
+### Folgesätze nach Ernteziel
+
+Für Salat, Kräuter und alles, was laufend geerntet wird: Unter **Sätze → Ernteziel** (oder in der Anzucht über „Ernteziel planen“) gibst du Kultur, Sorte, Erntezeitraum und die **Menge je Woche** an, etwa „6 Köpfe Kopfsalat von KW 20 bis KW 41“. Beetwerk rechnet rückwärts:
+
+- **Abstand der Sätze** = Erntefenster je Satz (Standard: Erntedauer der Kultur, bei Kopfsalat 14 Tage). Ein kürzerer Abstand lässt Sätze überlappen, z. B. Pflücksalat alle 3 Wochen bei 50 Tagen Ernte.
+- **Pflanzen je Satz** = Menge je Woche × Abstand ÷ Ertrag je Pflanze über das Erntefenster (Kopfsalat 1 Kopf, Pflücksalat etwa 4 Portionen, Basilikum etwa 5 Bund – Vorschläge kommen mit der Kultur). Die Fläche ohne Beet wird auf volle Reihen aufgerundet.
+- **Termine:** Pflanzung so, dass die Kultur zum Erntebeginn fertig ist; bei Anzucht davor die Aussaat. Mit „Kulturdauer an die Jahreszeit anpassen“ zählt Beetwerk die Wärmesumme: Die Kulturdauer der Kultur gilt für eine Pflanzung Anfang Mai (wärmeliebende Kulturen Anfang Juni), im kühlen Frühjahr und Herbst dauert es entsprechend länger – Kopfsalat Mitte März gepflanzt braucht so gut 9 Wochen, im Sommer 6. Grundlage sind die Temperaturen deines Gartens aus den Wetterdaten der letzten Jahre, ohne sie typische Werte für Süddeutschland. Was im Freiland zu kalt wird (mehr als die dreifache Kulturdauer), plant Beetwerk nicht und sagt es; im Gewächshaus schaltest du die Anpassung ab.
+- Die Vorschau zeigt alle Sätze mit Aussaat, Pflanzung, Ernte, Pflanzenzahl und Kulturdauer, bevor etwas angelegt wird.
+- Die Sätze entstehen **ohne Beet** und stehen sofort in der Anzucht. „Beete vorschlagen“ zeigt je Satz Beete mit freiem Platz während der ganzen Zeit im Beet; Beete, auf denen dieselbe Pflanzenfamilie in der Anbaupause stand, kommen zuletzt. „Alle ersten Vorschläge übernehmen“ verteilt die Sätze in einem Rutsch.
+- **Ziel ändern** passt die noch nicht gesäten Sätze an (Termine, Größe), Beet und Lage bleiben. Begonnene Sätze (gesät, gepflanzt oder bonitiert) bleiben, wie sie sind. Löschen nimmt die nicht begonnenen Sätze mit.
+- Für Frühjahr, Sommer und Herbst lohnen eigene Ziele mit passender Sorte (schossfeste Sommersalate).
+
 ## Grundstück auf dem Luftbild
 
 Unter **Einstellungen → Grundstück** oder in der Seitenleiste der Karte. Die Einrichtung läuft in vier Schritten:
@@ -295,6 +308,7 @@ Bonitur:
 - `POST /api/research/variety` recherchiert eine Sorte (`{"name", "crop_id", "hint", "image"}`), `POST /api/research/batch` (`{"ids": [...]}`) mehrere im Hintergrund, `GET /api/research/batch` zeigt den Stand, `POST /api/photos/from-url` holt ein Bild
 - `GET /api/nursery?year=2027` Anzuchten, Wochenaufgaben und Belegung; `PATCH /api/nursery` (`{"key", "sown_done", "seeds_sown", "plants_raised", …}`) hält fest, was passiert ist
 - `POST/PATCH/DELETE /api/containers`, `/api/places`, `/api/people`, `/api/handovers` für Gefäße, Anzuchtplätze, Freunde und ihre Wünsche
+- `POST /api/goals/preview` rechnet ein Ernteziel durch, ohne zu speichern; `POST/PATCH/DELETE /api/goals` legt die Folgesätze an, passt sie an oder löscht sie (`?keep=true` behält die Sätze); `GET /api/goals/suggest?crop_id=` schlägt Einheit und Ertrag vor
 - `GET /api/baserow` Zustand des Abgleichs, `POST /api/baserow/sync` gleicht sofort ab, `POST /api/baserow/setup` bzw. `/connect` richten ein, `DELETE /api/baserow` trennt
 
 Ein Mischsatz trägt `varieties` (Liste aus `{"name", "count", "ref"}`), `fill` (`snake` oder `columns`) und `fill_start` (`tl`, `tr`, `bl`, `br`). Eine leere Liste macht ihn wieder zum normalen Satz mit `variety`.
@@ -318,6 +332,7 @@ Aufbau:
 - `app/seed.py`: Kulturen und Beispielgarten
 - `app/geo.py`: Koordinaten zwischen Grundstück und Erde, Luftbild-Abruf
 - `app/bonitur.py`: Merkmalkatalog, Einzelpflanzen, Boniturwerte, Fotos und CSV
+- `app/goals.py`: Ernteziele – Folgesätze rückwärts aus der Menge je Woche, Kulturdauer nach Wärmesumme
 - `app/nursery.py`: Anzucht – Rechnung aus Sätzen und Wünschen, Wochenaufgaben, Belegung, Gefäße, Plätze, Freunde
 - `app/varieties.py`, `app/profile.py` und `app/research.py`: Sortenliste, Sortenprofil aus Bonitur und Recherche, Recherche mit Claude (`tests/fakeclaude.py` ist eine künstliche Claude-Schnittstelle samt Commons und Shop für Tests: `python tests/fakeclaude.py 8794`, Schlüssel `sk-test`)
 - `app/baserow.py`: Einrichtung und Abgleich mit Baserow (`tests/fakebaserow.py` ist ein künstliches Baserow für Tests: `python tests/fakebaserow.py 8793`, Anmeldung `garten@example.org` / `geheim`)
