@@ -104,6 +104,36 @@ export async function createSuccession(p, days = 14) {
   return item;
 }
 
+// Stellung eines Satzes in seinem Ernteziel: { list, pos (ab 0), total, next } oder null
+export function goalSeries(p) {
+  if (p?.goal_id == null) return null;
+  const list = state.plantings.filter((q) => q.goal_id === p.goal_id)
+    .sort((a, b) => (a.goal_seq ?? 0) - (b.goal_seq ?? 0) || phases(a).sow - phases(b).sow);
+  const pos = list.findIndex((q) => q.id === p.id);
+  if (pos < 0) return null;
+  return { list, pos, total: list.length, next: list[pos + 1] ?? null };
+}
+
+// „Folgesatz“: Gehört der Satz zu einem Ernteziel, ist es dessen nächster geplanter Satz – eine Kopie
+// stünde neben dem Ziel. Sonst eine Kopie 14 Tage später. Der Stichtag springt an den Tag, an dem
+// der Satz ins Beet kommt (Aussaat bzw. Pflanzung); auf der Karte geht es ohne Beet gleich ans Setzen.
+export async function followUp(p, { place = document.body.dataset.view === "karte" } = {}) {
+  const series = goalSeries(p);
+  let item;
+  if (series) {
+    item = series.next;
+    if (!item) { toast("Das ist der letzte Satz dieses Ernteziels"); return null; }
+    select({ type: "planting", id: item.id });
+  } else {
+    item = await createSuccession(p, 14);
+    if (!item) return null;
+    item = find.planting(item.id) ?? item;
+  }
+  setDay(phases(item).fieldStart);
+  if (place && !item.bed_id) setMode({ type: "planting", id: item.id });
+  return item;
+}
+
 // ---------------------------------------------------------------- Satz
 
 export function openPlantingEditor(planting, defaults = {}) {
@@ -364,9 +394,10 @@ export function openPlantingEditor(planting, defaults = {}) {
       },
     }, "Löschen"),
     isNew ? null : h("button", {
-      type: "button", class: "btn btn-quiet", title: "Gleiche Kultur 14 Tage später",
-      onclick: async () => { ui.dlg.close(); await createSuccession(p, 14); },
-    }, "Folgesatz anlegen"),
+      type: "button", class: "btn btn-quiet",
+      title: p.goal_id ? "Nächster Satz des Ernteziels, Stichtag springt zu seiner Aussaat bzw. Pflanzung" : "Gleiche Kultur 14 Tage später",
+      onclick: async () => { ui.dlg.close(); await followUp(p); },
+    }, p.goal_id ? "Nächster Satz" : "Folgesatz anlegen"),
     h("span", { class: "spacer" }),
     cancelBtn(ui.dlg),
     h("button", { type: "submit", class: "btn btn-primary" }, isNew ? "Satz anlegen" : "Speichern"),
@@ -784,7 +815,8 @@ export async function createBedRect(kind, x, y, length, width, rotation = 0) {
 }
 
 // Satz ohne Beet einem Beet zuweisen; local = Stelle im Beet in Metern (Antippen oder Loslassen)
-export async function assignPlanting(pid, bed, local = null) {
+// spot: { start, offset } einer abgeernteten Fläche, auf die der Satz genau passen soll
+export async function assignPlanting(pid, bed, local = null, spot = null) {
   const p = find.planting(pid);
   if (!p || !bed) return null;
   if (!PLANTABLE.has(bed.kind)) {
@@ -797,7 +829,10 @@ export async function assignPlanting(pid, bed, local = null) {
   let span = p.span != null && p.span < bed.width - 0.001 ? p.span : null;
   let offset = 0;
   let start;
-  if (local) {
+  if (spot) {
+    start = round2(clamp(spot.start, 0, Math.max(0, bed.length - len)));
+    if (span != null) offset = round2(clamp(spot.offset || 0, 0, bed.width - span));
+  } else if (local) {
     start = round2(clamp(Math.round((local.x - len / 2) * 10) / 10, 0, Math.max(0, bed.length - len)));
     if (span != null) offset = round2(clamp(Math.round((local.y - span / 2) * 10) / 10, 0, bed.width - span));
   } else {
@@ -817,7 +852,8 @@ export async function assignPlanting(pid, bed, local = null) {
   return p;
 }
 
-export async function placeCrop(cropId, bed, local = null) {
+// spot: { start, len, offset, span } einer abgeernteten Fläche – die neue Kultur übernimmt sie genau
+export async function placeCrop(cropId, bed, local = null, spot = null) {
   const crop = find.crop(cropId);
   if (!crop || !bed) return null;
   if (!PLANTABLE.has(bed.kind)) {
@@ -827,15 +863,21 @@ export async function placeCrop(cropId, bed, local = null) {
   const dates = datesFromCrop(crop, state.day);
   const from = dayNum(crop.method === "transplant" ? dates.plant_date : dates.sow_date);
   const to = dayNum(dates.harvest_end);
-  const len = Math.min(1, bed.length);
+  let len = Math.min(1, bed.length);
   let span = null;
   let offset = 0;
-  if (bed.width > 1.6) {
+  if (spot) {
+    len = round2(Math.min(spot.len, bed.length));
+    span = spot.span != null && spot.span < bed.width - 0.001 ? round2(spot.span) : null;
+    offset = span != null ? round2(clamp(spot.offset || 0, 0, bed.width - span)) : 0;
+  } else if (bed.width > 1.6) {
     span = Math.min(1.2, bed.width);
     offset = local ? round2(clamp(Math.round((local.y - span / 2) * 10) / 10, 0, bed.width - span)) : 0;
   }
   let start;
-  if (local) {
+  if (spot) {
+    start = round2(clamp(spot.start, 0, bed.length - len));
+  } else if (local) {
     start = round2(clamp(Math.round((local.x - len / 2) * 10) / 10, 0, bed.length - len));
   } else {
     start = firstFreeStart(bed, len, { offset, span, from, to }) ?? 0;
