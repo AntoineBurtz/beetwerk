@@ -3,6 +3,7 @@ import { state, api, find, load, patch } from "./store.js";
 import { h, fmtDay, dayNum, isoWeek, plural, fmtNum, phases, yearOf } from "./util.js";
 import { toast, confirmDialog, icon } from "./ui.js";
 import { shell, field, firstFreeStart } from "./editor.js";
+import { openGoalOverview } from "./overview.js";
 
 const UNITS = ["Köpfe", "Stück", "Bund", "Portionen", "kg"];
 const BASIS = {
@@ -45,7 +46,7 @@ export function goalsSection(year) {
     const loose = ps.filter((p) => !p.bed_id);
     const first = ps.map((p) => p.sow_date).sort()[0];
     return h("div", { class: "goal" },
-      h("button", { type: "button", class: "goal-main", onclick: () => openGoalEditor(g) },
+      h("button", { type: "button", class: "goal-main", onclick: () => openGoalOverview(g) },
         h("span", { class: "dot", style: { background: crop?.color } }),
         h("span", { class: "goal-title" }, `${crop?.name || "Kultur"}${g.variety ? ` ${g.variety}` : ""}`),
         h("span", { class: "goal-what" }, `${amountText(g)} je Woche · ${kw(g.start_date)} bis ${kw(g.end_date)}`),
@@ -260,7 +261,7 @@ export function suggestBeds(p, max = 3) {
   return out.slice(0, max);
 }
 
-function openAssign(g) {
+export function openAssign(g) {
   const crop = find.crop(g.crop_id);
   const ui = shell(`Beete für ${crop?.name || "Kultur"}${g.variety ? ` ${g.variety}` : ""}`, { onSubmit: () => {} });
   const list = h("div", { class: "assign" });

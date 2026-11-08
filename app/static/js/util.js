@@ -29,6 +29,19 @@ export function yearLength(year) {
   return yearStart(year + 1) - yearStart(year);
 }
 
+// Monatsanfänge im Bereich [from, from + len): [{ day, year, month }]
+export function monthStarts(from, len) {
+  const d0 = new Date(from * DAY);
+  const out = [];
+  for (let m = d0.getUTCMonth() + (d0.getUTCDate() === 1 ? 0 : 1); ; m++) {
+    const n = Math.floor(Date.UTC(d0.getUTCFullYear(), m, 1) / DAY);
+    if (n >= from + len) break;
+    const d = new Date(n * DAY);
+    out.push({ day: n, year: d.getUTCFullYear(), month: d.getUTCMonth() });
+  }
+  return out;
+}
+
 export function isoWeek(n) {
   const d = new Date(n * DAY);
   d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 3); // Donnerstag dieser Woche

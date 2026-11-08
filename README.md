@@ -3,7 +3,7 @@
 Anbauplanung für den Gemüsegarten mit zwei gekoppelten Ansichten:
 
 - **Beetkarte**: Grundstück mit maßstäblichen Beeten (wie bei GrowVeg). Beete ziehst, drehst und skalierst du direkt auf der Karte. Sätze liegen als Flächen im Beet, mit Reihen und einzelnen Pflanzen.
-- **Zeitleiste**: Jede Zeile ist ein Beet, jeder Balken ein Satz mit Anzucht, Zeit im Beet und Ernte (wie bei Qrop). Balken lassen sich verschieben, verlängern und in ein anderes Beet ziehen.
+- **Zeitleiste**: Jede Zeile ist ein Beet, jeder Balken ein Satz mit Anzucht, Zeit im Beet und Ernte (wie bei Qrop). Balken lassen sich verschieben, verlängern und in ein anderes Beet ziehen. Oben wählst du, wie viel sie zeigt: **1 Jahr**, **1½ Jahre** oder **2 Jahre** – also bis ins Folgejahr, etwa für Knoblauch, Wintergemüse oder die Planung im Herbst.
 
 Beide Ansichten hängen am **Stichtag** (das gelbe Etikett). Verschiebst du ihn in der Zeitleiste oder im Regler unter der Karte, zeigt die Karte, was an diesem Tag wo im Boden ist. Der Regler zeigt außerdem die Flächenauslastung über das Jahr.
 
@@ -179,6 +179,7 @@ Für Salat, Kräuter und alles, was laufend geerntet wird: Unter **Sätze → Er
 - **Pflanzen je Satz** = Menge je Woche × Abstand ÷ Ertrag je Pflanze über das Erntefenster (Kopfsalat 1 Kopf, Pflücksalat etwa 4 Portionen, Basilikum etwa 5 Bund – Vorschläge kommen mit der Kultur). Die Fläche ohne Beet wird auf volle Reihen aufgerundet.
 - **Termine:** Pflanzung so, dass die Kultur zum Erntebeginn fertig ist; bei Anzucht davor die Aussaat. Mit „Kulturdauer an die Jahreszeit anpassen“ zählt Beetwerk die Wärmesumme: Die Kulturdauer der Kultur gilt für eine Pflanzung Anfang Mai (wärmeliebende Kulturen Anfang Juni), im kühlen Frühjahr und Herbst dauert es entsprechend länger – Kopfsalat Mitte März gepflanzt braucht so gut 9 Wochen, im Sommer 6. Grundlage sind die Temperaturen deines Gartens aus den Wetterdaten der letzten Jahre, ohne sie typische Werte für Süddeutschland. Was im Freiland zu kalt wird (mehr als die dreifache Kulturdauer), plant Beetwerk nicht und sagt es; im Gewächshaus schaltest du die Anpassung ab.
 - Die Vorschau zeigt alle Sätze mit Aussaat, Pflanzung, Ernte, Pflanzenzahl und Kulturdauer, bevor etwas angelegt wird.
+- In der Zeitleiste stehen die Sätze eines Ziels als **eine Satzfolge** in einer Spur statt in mehreren Reihen übereinander: hell die Zeit im Beet, kräftig die Erntefenster (ein heller Strich, wo der nächste Satz in die Ernte geht), kleine Dreiecke oben, wo ein Satz gesät oder gepflanzt wird. Der zweite Klick öffnet die Übersicht des Ernteziels mit allen Sätzen auf einem gemeinsamen Zeitstrahl, Stand, nächster Aussaat und Pflanzenzahl; „Sätze einzeln zeigen“ klappt die Folge in der Zeitleiste auf, „Als Satzfolge zeigen“ oder „Zusammenfassen“ wieder zu.
 - Die Sätze entstehen **ohne Beet** und stehen sofort in der Anzucht. „Beete vorschlagen“ zeigt je Satz Beete mit freiem Platz während der ganzen Zeit im Beet; Beete, auf denen dieselbe Pflanzenfamilie in der Anbaupause stand, kommen zuletzt. „Alle ersten Vorschläge übernehmen“ verteilt die Sätze in einem Rutsch.
 - **Ziel ändern** passt die noch nicht gesäten Sätze an (Termine, Größe), Beet und Lage bleiben. Begonnene Sätze (gesät, gepflanzt oder bonitiert) bleiben, wie sie sind. Löschen nimmt die nicht begonnenen Sätze mit.
 - Für Frühjahr, Sommer und Herbst lohnen eigene Ziele mit passender Sorte (schossfeste Sommersalate).
@@ -257,7 +258,7 @@ Die Datenbank ist eine SQLite-Datei (`beetwerk.db` im Datenordner). Für Backups
 Die Oberfläche passt sich an kleine Bildschirme an (Navigation unten). Über „Zum Startbildschirm hinzufügen“ läuft sie wie eine App.
 
 - Karte: ein Finger verschiebt, zwei Finger zoomen. Kultur antippen, dann aufs Beet tippen. Doppelt tippen öffnet den Dialog.
-- Zeitleiste: Balken antippen öffnet den Dialog. Ziehen von Balken geht mit Maus oder Stift.
+- Zeitleiste: Balken antippen markiert ihn, nochmal antippen (oder „Details“ in der Leiste unten) öffnet die Übersicht. Den Zeitraum wählst du über die Auswahl neben + und −. Ziehen von Balken geht mit Maus oder Stift.
 
 ## Ohne Docker
 
@@ -279,8 +280,10 @@ BEETWERK_DATA=./data uvicorn app.main:app --host 0.0.0.0 --port 8000
 | Karte | **+** unten rechts: Art der Fläche wählen (Beet, Hochbeet, Gewächshaus, Weg, Sonstiges) und auf der Karte aufziehen; Antippen legt eine Fläche in Standardgröße an. Mehrere nacheinander möglich, „Fertig“ beendet. |
 | Karte | Sätze ohne Beet (z. B. aus der Zeitleiste ohne Beet angelegt) zeigt ein Hinweis oben rechts. In der Seitenleiste lassen sie sich auf ein Beet ziehen oder antippen und dann aufs Beet tippen. |
 | Zeitleiste | Balken waagerecht ziehen verschiebt alle Termine, senkrecht in eine andere Zeile wechselt das Beet. Rechte Kante ändert das Ernteende, linke Kante den Aussaattermin. |
-| Zeitleiste | Klick auf eine freie Stelle legt dort einen neuen Satz an. Klick in den Kopf setzt den Stichtag. |
-| Zeitleiste | Klick auf einen Balken öffnet die Übersicht des Satzes. Klick auf den Beetnamen links zeigt rechts die Übersicht des Beets (Art, Größe, Notizen, Belegung, Fruchtfolge); „Bearbeiten“ öffnet das Formular. Esc oder × schließt. |
+| Zeitleiste | Klick auf eine freie Stelle legt dort einen neuen Satz an; ist gerade etwas markiert, hebt der Klick nur die Markierung auf. Klick in den Kopf setzt den Stichtag. |
+| Zeitleiste | **Erster Klick markiert** einen Satz (oder eine Satzfolge), unten erscheint eine Leiste mit Name, Beet und Stand. **Zweiter Klick** auf denselben Balken – oder „Details“ – öffnet die Übersicht. Esc oder × hebt die Markierung auf. |
+| Zeitleiste | „1 Jahr / 1½ Jahre / 2 Jahre“ legt fest, wie weit die Zeitleiste reicht; sie beginnt immer im Januar des Stichtag-Jahres, der Januar des Folgejahres trägt die Jahreszahl. Wetterband und Frostschattierung laufen über den Jahreswechsel weiter. Die Wahl bleibt gespeichert. |
+| Zeitleiste | Klick auf den Beetnamen links zeigt rechts die Übersicht des Beets (Art, Größe, Notizen, Belegung, Fruchtfolge); „Bearbeiten“ öffnet das Formular. Esc oder × schließt. |
 | Überall | **Erst Übersicht, dann Bearbeiten:** Ein Klick auf eine Kultur, ein Beet, eine Sorte, einen Satz oder eine Anzucht zeigt eine Übersicht zum Lesen; geändert wird erst nach „Bearbeiten“ bzw. „Stand eintragen“. Unterstrichene Namen in einer Übersicht (Kultur, Sorte, Beet, Satz) öffnen deren Übersicht darüber, „Schließen“ oder Esc führt zurück. Nach dem Speichern zeigen offene Übersichten gleich den neuen Stand. |
 | Überall | `[` und `]` springen eine Woche zurück oder vor, Strg+Z macht die letzte Änderung rückgängig. |
 

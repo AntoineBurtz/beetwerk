@@ -1,7 +1,7 @@
 // Wetter in der Zeitleiste: Regen, Frost und Wasserbilanz. Daten von Open-Meteo (CC BY 4.0),
 // abgerufen und zwischengespeichert vom eigenen Server.
 import { state, api } from "./store.js";
-import { h, s, dayNum, fmtDay, fmtDayLong, fmtNum, clamp } from "./util.js";
+import { h, s, dayNum, fmtDay, fmtDayLong, fmtNum, clamp, yearOf, monthStarts } from "./util.js";
 
 export const WX_H = 44;
 const RAIN_TOP = 7;     // Platz oben für Frostmarken
@@ -94,6 +94,22 @@ export function weatherFor(year, onLoad) {
     (err) => ({ status: "error", error: err.message, days: [] }));
 }
 
+// Mehrere Jahre am Stück (Zeitleiste über den Jahreswechsel); null, solange noch nichts da ist
+export function weatherSpan(years, onLoad) {
+  const parts = years.map((y) => weatherFor(y, onLoad));
+  if (parts.length === 1) return parts[0];
+  const ready = parts.filter(Boolean);
+  const byDay = new Map();
+  for (const p of ready) for (const d of p.days || []) byDay.set(d.day, d);
+  if (!byDay.size) return ready.length < parts.length ? null : ready.find((p) => p.status !== "ok") || ready[0];
+  return {
+    ...ready[0], status: "ok",
+    days: [...byDay.values()].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0)),
+    today: ready.find((p) => p.today)?.today ?? null,
+    error: ready.find((p) => p.error)?.error ?? null,
+  };
+}
+
 // ---------------------------------------------------------------- Frost: letzte und erste Frosttage der Vorjahre
 
 export const FROST_COLOR = "#7b62c9";
@@ -134,7 +150,16 @@ export function frostModel(frost, year) {
     autumnEarliest: at(st.autumn_earliest),
     frostFree: st.frost_free_median,
     stats: st,
+    marks: [[at(st.spring_median), "spring"], [at(st.autumn_median), "autumn"]],
   };
+}
+
+// Frostdaten für mehrere Jahre hintereinander: Zählung je Jahr, mittlere Termine in jedem Jahr
+export function frostSpan(frost, years) {
+  const models = years.map((y) => frostModel(frost, y));
+  if (!models[0] || models.length === 1) return models[0];
+  const byYear = new Map(years.map((y, i) => [y, models[i]]));
+  return { ...models[0], count: (d) => (byYear.get(yearOf(d)) ?? models[0]).count(d), marks: models.flatMap((m) => m.marks) };
 }
 
 export function frostTipLine(fm, d) {
@@ -191,7 +216,7 @@ export function frostOverlay(geo, fm) {
     run = { from: d, to: d, k };
   }
   flush();
-  for (const d of [fm.spring, fm.autumn]) {
+  for (const [d] of fm.marks) {
     if (d == null || d < ys || d >= ys + len) continue;
     const x = (d - ys + 0.5) * ppd;
     svg.append(s("line", { x1: x, x2: x, y1: 0, y2: "100%", class: "frost-median" }));
@@ -315,12 +340,12 @@ export function weatherBand(geo, data, { onSettings, frost: fm = null } = {}) {
 }
 
 function drawBand(geo, balance, today, fm) {
-  const { year, ys, len, ppd } = geo;
+  const { ys, len, ppd } = geo;
   const W = len * ppd;
   const svg = s("svg", { class: "wx-svg", width: W, height: WX_H, viewBox: `0 0 ${W} ${WX_H}`, "aria-hidden": "true" });
   // Monatslinien
-  for (let m = 1; m < 12; m++) {
-    const x = (Math.floor(Date.UTC(year, m, 1) / 86400000) - ys) * ppd;
+  for (const { day } of monthStarts(ys + 1, len - 1)) {
+    const x = (day - ys) * ppd;
     svg.append(s("line", { x1: x, x2: x, y1: 0, y2: WX_H, class: "wx-mline" }));
   }
   // Vorhersagezeitraum hinterlegen
@@ -351,8 +376,9 @@ function drawBand(geo, balance, today, fm) {
   svg.append(s("line", { x1: 0, x2: W, y1: base + 0.5, y2: base + 0.5, class: "wx-base" }));
   // Mittlere Frosttermine der Vorjahre
   if (fm) {
-    for (const [d, text, anchor] of [[fm.spring, "Ø letzter Frost", "start"], [fm.autumn, "Ø erster Frost", "end"]]) {
+    for (const [d, kind] of fm.marks) {
       if (d == null || d < ys || d >= ys + len) continue;
+      const [text, anchor] = kind === "spring" ? ["Ø letzter Frost", "start"] : ["Ø erster Frost", "end"];
       const x = (d - ys + 0.5) * ppd;
       svg.append(s("line", { x1: x, x2: x, y1: 0, y2: WX_H, class: "wx-frost-median" }));
       svg.append(s("text", { x: anchor === "start" ? x + 4 : x - 4, y: 16, "text-anchor": anchor, class: "wx-frost-label" },
