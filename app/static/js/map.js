@@ -7,11 +7,11 @@ import {
 } from "./util.js";
 import { mixLegend, downloadPlan } from "./mix.js";
 import {
-  openPlantingEditor, openBedEditor, createBedRect, placeCrop, createSuccession, assignPlanting, DEFAULT_BED_SIZE,
+  openPlantingEditor, openBedEditor, createBedRect, placeCrop, followUp, goalSeries, assignPlanting, DEFAULT_BED_SIZE,
 } from "./editor.js";
 import { iconBtn, icon, toast, confirmDialog, replaceKeepingFocus } from "./ui.js";
 import { bedSummary, bedUsage, miniTimeline } from "./bedpanel.js";
-import { cropLink, varietyLink } from "./overview.js";
+import { cropLink, varietyLink, link, openGoalOverview } from "./overview.js";
 import { openGeoSetup } from "./geosetup.js";
 import { openBonitur } from "./bonitur.js";
 
@@ -230,12 +230,17 @@ export function mountMap(root) {
       return;
     }
     let what = "die Kultur";
+    let when = "";
     if (mode.type === "crop") what = find.crop(mode.id)?.name ?? what;
     else {
       const p = find.planting(mode.id);
       what = p ? `${find.crop(p.crop_id)?.name ?? "den Satz"}${varietyText(p) ? " " + varietyText(p) : ""}` : "den Satz";
+      const series = goalSeries(p);
+      if (p) when = ` (${series ? `Satz ${series.pos + 1} von ${series.total}, ` : ""}${phases(p).plant != null ? "pflanzen" : "säen"} ${fmtDay(phases(p).fieldStart)})`;
     }
-    hint.replaceChildren(h("span", {}, `Tippe auf ein Beet, um ${what} zu setzen`),
+    const ghosts = state.beds.some((b) => PLANTABLE.has(b.kind) && harvestedOn(b).length);
+    hint.replaceChildren(h("span", {}, `Tippe auf ein Beet, um ${what} zu setzen${when}.`,
+      ghosts ? h("span", { class: "hint-sub" }, "Tippen in eine gestrichelte, abgeerntete Fläche nutzt genau diese Fläche.") : null),
       h("button", { type: "button", class: "btn btn-sm", onclick: () => setMode(null) }, "Abbrechen"));
   }
 
@@ -354,6 +359,51 @@ export function mountMap(root) {
     }[kind] || { fill: "url(#soil)", stroke: "#6b4f3a" };
   }
 
+  // Abgeerntete Sätze im Jahr des Stichtags: als gestrichelte Fläche angedeutet, damit man sieht,
+  // wo schon etwas stand und wo sich neu säen lässt (z. B. die nächsten Radieschen-Sätze)
+  function harvestedOn(bed) {
+    const y = yearOf(state.day);
+    return state.plantings.filter((p) => {
+      if (p.bed_id !== bed.id) return false;
+      const he = phases(p).he;
+      return he < state.day && yearOf(he) === y;
+    }).sort((a, b) => phases(a).he - phases(b).he);
+  }
+
+  const inside = (r, pt) => pt.x >= r.x && pt.x <= r.x + r.w && pt.y >= r.y && pt.y <= r.y + r.h;
+
+  // Abgeerntete Fläche unter einem Punkt (Meter im Beet), die zuletzt abgeerntete zuerst; nicht, wo jetzt etwas steht
+  function spotAt(bed, local) {
+    if (!bed || !local || !PLANTABLE.has(bed.kind)) return null;
+    if (state.plantings.some((p) => p.bed_id === bed.id && onBedAt(p, state.day) && inside(rectOf(p, bed), local))) return null;
+    const hit = harvestedOn(bed).reverse().find((p) => inside(rectOf(p, bed), local));
+    if (!hit) return null;
+    const r = rectOf(hit, bed);
+    return { start: r.x, len: r.w, offset: r.y, span: r.h < bed.width - 0.001 ? r.h : null };
+  }
+
+  function drawGhost(p, bed, k, labelled) {
+    const crop = find.crop(p.crop_id);
+    const color = crop?.color || "#6a9b3c";
+    const r = rectOf(p, bed);
+    const x = r.x * U, y = r.y * U, w = r.w * U, hh = r.h * U;
+    const g = s("g", { class: "ghost", "pointer-events": "none" });
+    g.append(s("rect", { class: "ghost-area", x, y, width: w, height: hh, fill: mix(color, "#ffffff", 0.6),
+      stroke: mix(color, "#ffffff", 0.2), "stroke-width": 1.6, "stroke-dasharray": "5 4", "vector-effect": "non-scaling-stroke" }));
+    if (labelled && hh / k >= 13 && w / k >= 30) {
+      const fs = Math.min(12 * k, hh * 0.4);
+      const pad = 4 * k;
+      const maxChars = Math.max(2, Math.floor((w - 2 * pad) / (fs * 0.47)));
+      const clip = (t) => (t.length > maxChars ? t.slice(0, Math.max(1, maxChars - 1)) + "…" : t);
+      const sub = `bis ${fmtDay(phases(p).he)}`;
+      const t = s("text", { class: "pl-label pl-ghost", x: x + pad, y: y + pad + fs * 0.85,
+        style: `font-size:${fs}px; stroke-width:${3.5 * k}px` }, clip(crop?.name ?? "Kultur"));
+      if (hh / k >= 30) t.append(s("tspan", { class: "pl-sub", x: x + pad, dy: fs * 1.08, style: `font-size:${fs * 0.88}px` }, clip(sub)));
+      g.append(t);
+    }
+    return g;
+  }
+
   function drawBed(bed, k, overLayer) {
     const L = bed.length * U, Wd = bed.width * U;
     const selBed = state.sel?.type === "bed" && state.sel.id === bed.id;
@@ -378,6 +428,14 @@ export function mountMap(root) {
         return ph.fieldStart > state.day && ph.fieldStart <= state.day + UPCOMING_DAYS;
       });
       const active = mine.filter((p) => onBedAt(p, state.day));
+      const past = harvestedOn(bed);
+      const overlap = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+      past.forEach((p, i) => {
+        // Beschriftung nur, wo nichts Späteres darüber liegt
+        const r = rectOf(p, bed);
+        const covered = [...past.slice(i + 1), ...upcoming, ...active].some((q) => overlap(r, rectOf(q, bed)) > 0.4 * r.w * r.h);
+        pg.append(drawGhost(p, bed, k, !covered));
+      });
       for (const p of upcoming) pg.append(drawPlanting(p, bed, k, "upcoming"));
       for (const p of active) pg.append(drawPlanting(p, bed, k, "active"));
       g.append(pg);
@@ -779,10 +837,11 @@ export function mountMap(root) {
       if (g.type === "place") {
         const bed = find.bed(g.bedId);
         const l = toLocal(e, g.inv);
+        const local = { x: l.x / U, y: l.y / U };
         const mode = state.mode;
         setMode(null);
-        if (mode?.type === "crop") await placeCrop(mode.id, bed, { x: l.x / U, y: l.y / U });
-        else if (mode?.type === "planting") await assignPlanting(mode.id, bed, { x: l.x / U, y: l.y / U });
+        if (mode?.type === "crop") await placeCrop(mode.id, bed, local, spotAt(bed, local));
+        else if (mode?.type === "planting") await assignPlanting(mode.id, bed, local, spotAt(bed, local));
         return;
       }
       if (g.type === "draw") {
@@ -1098,7 +1157,7 @@ export function mountMap(root) {
       label: crop.name,
       color: crop.color,
       onTap: () => (bed ? placeCrop(crop.id, bed) : setMode(active ? null : { type: "crop", id: crop.id })),
-      onDrop: (target, local) => placeCrop(crop.id, target, local),
+      onDrop: (target, local) => placeCrop(crop.id, target, local, spotAt(target, local)),
     });
   }
 
@@ -1115,8 +1174,13 @@ export function mountMap(root) {
     return draggable(el, {
       label: name,
       color: crop?.color || "#6a9b3c",
-      onTap: () => setMode(active ? null : { type: "planting", id: p.id }),
-      onDrop: (target, local) => assignPlanting(p.id, target, local),
+      // Antippen: zum Tag springen, an dem der Satz ins Beet kommt, und dann aufs Beet tippen
+      onTap: () => {
+        if (active) { setMode(null); return; }
+        setMode({ type: "planting", id: p.id });
+        setDay(ph.fieldStart);
+      },
+      onDrop: (target, local) => assignPlanting(p.id, target, local, spotAt(target, local)),
     });
   }
 
@@ -1148,6 +1212,8 @@ export function mountMap(root) {
     else status = `Abgeräumt seit ${fmtDay(ph.he)}`;
     const visible = onBedAt(p, day) || (ph.fieldStart > day && ph.fieldStart <= day + UPCOMING_DAYS);
     const year = yearOf(day);
+    const series = goalSeries(p);
+    const goal = series ? (state.goals || []).find((g) => g.id === p.goal_id) : null;
 
     const kv = h("dl", { class: "kv", style: { margin: 0 } },
       h("dt", {}, "Beet"), h("dd", {}, bed ? bed.name : "Ohne Beet"),
@@ -1175,10 +1241,17 @@ export function mountMap(root) {
       issues.length ? h("ul", { class: "issues" }, issues.map((i) => h("li", { class: i.kind }, i.text))) : null,
       kv,
       p.notes ? h("p", { class: "small", style: { margin: 0, whiteSpace: "pre-wrap" } }, p.notes) : null,
+      series && goal ? h("p", { class: "small", style: { margin: 0 } }, `Satz ${series.pos + 1} von ${series.total} im Ernteziel `,
+        link(`${fmtNum(goal.amount)} ${goal.unit} je Woche`, () => openGoalOverview(goal))) : null,
       bed ? null : h("div", {},
-        h("button", { type: "button", class: "btn btn-sm btn-primary", onclick: () => setMode({ type: "planting", id: p.id }) }, "Auf ein Beet setzen")),
+        h("button", { type: "button", class: "btn btn-sm btn-primary", title: `Springt zum ${ph.plant != null ? "Pflanztag" : "Saattag"}; danach aufs Beet tippen`,
+          onclick: () => { setMode({ type: "planting", id: p.id }); setDay(ph.fieldStart); } }, "Auf ein Beet setzen")),
       h("div", { class: "actions" },
-        h("button", { type: "button", class: "btn btn-sm", onclick: () => createSuccession(p, 14), title: "Gleiche Kultur 14 Tage später" }, icon("copy"), "Folgesatz"),
+        series
+          ? (series.next ? h("button", { type: "button", class: "btn btn-sm", onclick: () => followUp(p, { place: true }),
+            title: `Satz ${series.pos + 2} von ${series.total} des Ernteziels: Stichtag springt zu seiner ${phases(series.next).plant != null ? "Pflanzung" : "Aussaat"}${series.next.bed_id ? "" : ", danach aufs Beet tippen"}` },
+          icon("right"), `Nächster Satz (${series.pos + 2}/${series.total})`) : null)
+          : h("button", { type: "button", class: "btn btn-sm", onclick: () => followUp(p, { place: true }), title: "Gleiche Kultur 14 Tage später, Stichtag springt mit" }, icon("copy"), "Folgesatz"),
         crop?.trait_group ? h("button", { type: "button", class: "btn btn-sm", onclick: () => openBonitur(p.id), title: "Pflanzen dieses Satzes bonitieren" }, "Bonitieren") : null,
         bed ? h("button", { type: "button", class: "btn btn-sm btn-quiet", onclick: () => select({ type: "bed", id: bed.id }) }, `${bed.name} zeigen`) : null,
         h("button", { type: "button", class: "btn btn-sm btn-danger", onclick: deleteSelected }, icon("trash"), "Löschen")),

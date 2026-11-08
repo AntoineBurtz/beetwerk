@@ -7,7 +7,7 @@ import {
   spanOf, spacing, mixPlan, KIND_LABEL, PLANTABLE, isoWeek, dayNum, onBedAt, isoOf, monthStarts, MONTHS_SHORT,
 } from "./util.js";
 import { icon, toast } from "./ui.js";
-import { shell, openCropEditor, openBedEditor, openPlantingEditor, createSuccession } from "./editor.js";
+import { shell, openCropEditor, openBedEditor, openPlantingEditor, followUp, goalSeries } from "./editor.js";
 import { miniTimeline, rotationHistory } from "./bedpanel.js";
 import { openVarietyDetail, openVarietyEditor, varietyThumb } from "./varieties.js";
 import { cardTraits } from "./profileform.js";
@@ -322,7 +322,7 @@ export function openPlantingOverview(p0) {
         !isMixed(p) && names.some((n) => varietyOf(p.crop_id, n)) ? h("div", { class: "ov-varieties" },
           names.map((n) => varietyOf(p.crop_id, n)).filter(Boolean).map((v) => varietyCard(v, crop))) : null,
         isMixed(p) ? block("Sorten im Beet", mixLegend(p, crop, bed)) : null,
-        goal ? h("p", { class: "small", style: { margin: 0 } }, "Gehört zum Ernteziel ",
+        goal ? h("p", { class: "small", style: { margin: 0 } }, goalSeries(p) ? `Satz ${goalSeries(p).pos + 1} von ${goalSeries(p).total} im Ernteziel ` : "Gehört zum Ernteziel ",
           link(`${fmtNum(goal.amount)} ${goal.unit} je Woche`, () => openGoalOverview(goal)),
           ". Ändert sich das Ziel, passt sich der Satz an, solange er nicht gesät ist.") : null,
         p.notes ? block("Notizen", h("p", { class: "var-notes" }, p.notes)) : null,
@@ -338,10 +338,16 @@ export function openPlantingOverview(p0) {
           const visible = onBedAt(now, state.day) || !now.bed_id;
           showOnMap({ type: "planting", id: now.id }, visible ? null : phases(now).fieldStart);
         } }, "Auf der Karte"),
-        h("button", { type: "button", class: "btn", title: "Gleiche Kultur 14 Tage später", onclick: async () => {
-          const item = await createSuccession(find.planting(p0.id) || p, 14);
-          if (item) openPlantingOverview(item);
-        } }, icon("copy"), "Folgesatz"),
+        p.goal_id
+          ? (goalSeries(p)?.next ? h("button", { type: "button", class: "btn", title: "Nächster Satz des Ernteziels, der Stichtag springt zu seiner Aussaat bzw. Pflanzung",
+            onclick: async () => {
+              const item = await followUp(find.planting(p0.id) || p, { place: false });
+              if (item) openPlantingOverview(item);
+            } }, "Nächster Satz") : null)
+          : h("button", { type: "button", class: "btn", title: "Gleiche Kultur 14 Tage später", onclick: async () => {
+            const item = await followUp(find.planting(p0.id) || p, { place: false });
+            if (item) openPlantingOverview(item);
+          } }, icon("copy"), "Folgesatz"),
         crop?.trait_group ? h("button", { type: "button", class: "btn", onclick: () => { closeAll(); openBonitur(p0.id); } }, "Bonitieren") : null,
         h("span", { class: "spacer" }),
         h("button", { type: "button", class: "btn btn-quiet", onclick: () => ui.dlg.close() }, "Schließen"),
