@@ -10,7 +10,8 @@ import {
   openPlantingEditor, openBedEditor, createBedRect, placeCrop, createSuccession, assignPlanting, DEFAULT_BED_SIZE,
 } from "./editor.js";
 import { iconBtn, icon, toast, confirmDialog, replaceKeepingFocus } from "./ui.js";
-import { bedProperties, bedUsage, miniTimeline } from "./bedpanel.js";
+import { bedSummary, bedUsage, miniTimeline } from "./bedpanel.js";
+import { cropLink, varietyLink } from "./overview.js";
 import { openGeoSetup } from "./geosetup.js";
 import { openBonitur } from "./bonitur.js";
 
@@ -1120,10 +1121,10 @@ export function mountMap(root) {
   }
 
   function bedPanel(bed) {
-    const out = [bedProperties(bed, {
+    const out = [bedSummary(bed, {
       actions: [
+        h("button", { type: "button", class: "btn btn-sm btn-primary", onclick: () => openBedEditor(bed), title: "Name, Größe, Lage und Notizen ändern" }, icon("edit"), "Bearbeiten"),
         h("button", { type: "button", class: "btn btn-sm", onclick: () => patch("beds", bed.id, { rotation: ((bed.rotation || 0) + 90) % 360 }, { undoLabel: `${bed.name} gedreht` }) }, icon("rotate"), "90° drehen"),
-        h("button", { type: "button", class: "btn btn-sm btn-quiet", onclick: () => openBedEditor(bed), title: "Lage, Drehung und alle Eigenschaften" }, icon("edit"), "Mehr"),
         h("button", { type: "button", class: "btn btn-sm btn-danger", onclick: deleteSelected }, icon("trash"), "Löschen"),
       ],
     })];
@@ -1162,10 +1163,10 @@ export function mountMap(root) {
 
     const out = [section(
       h("div", { class: "panel-title" },
-        h("h2", { style: { display: "flex", alignItems: "center", gap: "8px" } },
-          h("span", { class: "dot", style: { background: crop?.color, width: "14px", height: "14px" } }), crop?.name ?? "Kultur"),
+        h("h2", { style: { display: "flex", alignItems: "center", gap: "8px" } }, cropLink(crop)),
         h("button", { type: "button", class: "btn btn-sm", onclick: () => openPlantingEditor(p) }, icon("edit"), "Bearbeiten")),
-      varietyText(p) ? h("p", { class: "muted", style: { margin: "-6px 0 0" } }, varietyText(p)) : null,
+      varietyText(p) ? h("p", { class: "muted", style: { margin: "-6px 0 0" } },
+        (isMixed(p) ? p.varieties.map((v) => v.name) : [p.variety]).flatMap((n, i) => [i ? ", " : "", varietyLink(p.crop_id, n)])) : null,
       h("p", { class: "status-line", style: { margin: 0 } }, status),
       miniTimeline(p, year),
       !visible && bed ? h("div", {},

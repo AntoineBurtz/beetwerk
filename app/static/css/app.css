@@ -1438,3 +1438,38 @@ table.goal-table tr.cold td { color: var(--ink-3); }
 .assign-bed { font-weight: 500; color: var(--leaf); }
 .assign-sugg { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip.warnchip { border-color: #e3c98a; background: var(--warn-soft); }
+
+/* ------------------------------------------------------------- Übersichten (Kultur, Beet, Satz) */
+
+.ov { display: grid; gap: 14px; }
+.ov-extra { display: contents; }
+.link.ov-link { display: inline-flex; align-items: center; gap: 6px; }
+.link.ov-link .dot { flex: none; }
+.dlg-head .ov-link, .panel-title .ov-link { color: inherit; text-decoration-color: var(--line-strong); }
+.dlg-head .ov-link:hover, .panel-title .ov-link:hover { text-decoration-color: currentColor; }
+.ov-head { display: flex; align-items: center; gap: 10px; }
+.ov-head h3 { margin: 0; font: 600 17px/1.2 var(--font-cond); letter-spacing: .02em; }
+.ov-head .btn { margin-left: auto; }
+.ov-rows { display: grid; border: 1px solid var(--line); border-radius: var(--r-m); overflow: hidden; background: var(--surface); }
+.ov-row { all: unset; box-sizing: border-box; cursor: pointer; display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 2px 14px;
+  align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.ov-row:last-child { border-bottom: 0; }
+.ov-row:hover { background: var(--surface-2); }
+.ov-row:focus-visible { outline: 2px solid var(--leaf); outline-offset: -2px; }
+.ov-row-main { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-row-sub { grid-column: 1; font-size: 13px; }
+.ov-row .mini-tl { grid-column: 2; grid-row: 1 / span 2; }
+.ov-varieties { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+.ov-var.var-card { padding: 8px; gap: 10px; }
+.ov-var .var-thumb { width: 52px; height: 52px; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14.5px; }
+.steps li::before { content: "○"; display: inline-block; width: 1.4em; color: var(--ink-3); }
+.steps li.done::before { content: "✓"; color: var(--leaf); font-weight: 700; }
+@media (max-width: 560px) {
+  .ov-row { grid-template-columns: minmax(0, 1fr); }
+  .ov-row .mini-tl { grid-column: 1; grid-row: auto; }
+}
+@media (max-width: 560px) {
+  /* Übersichten übereinander: jede deckt die darunterliegende ganz ab */
+  dialog.var-detail form { height: calc(100dvh - 24px); }
+}

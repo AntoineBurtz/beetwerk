@@ -6,7 +6,8 @@ import {
 } from "./util.js";
 import { openPlantingEditor, openBedEditor, firstFreeStart, openSettings } from "./editor.js";
 import { iconBtn, icon, confirmDialog, replaceKeepingFocus } from "./ui.js";
-import { bedProperties, bedUsage } from "./bedpanel.js";
+import { bedSummary, bedUsage } from "./bedpanel.js";
+import { openPlantingOverview } from "./overview.js";
 import { weatherFor, weatherBand, weatherEnabled, frostFor, frostModel, frostOverlay, WX_H } from "./weather.js";
 
 const ZOOMS = [1.3, 2, 3, 4.6, 7, 11];
@@ -52,15 +53,15 @@ export function mountTimeline(root) {
     side.hidden = !bed;
     if (!bed) { side.replaceChildren(); return; }
     replaceKeepingFocus(side, [
-      bedProperties(bed, {
+      bedSummary(bed, {
         onClose: () => select(null),
         actions: [
+          h("button", { type: "button", class: "btn btn-sm btn-primary", onclick: () => openBedEditor(bed), title: "Name, Größe, Lage und Notizen ändern" }, icon("edit"), "Bearbeiten"),
           h("button", { type: "button", class: "btn btn-sm", onclick: () => { location.hash = "karte"; } }, "Auf der Karte zeigen"),
-          h("button", { type: "button", class: "btn btn-sm btn-quiet", onclick: () => openBedEditor(bed), title: "Lage, Drehung und alle Eigenschaften" }, icon("edit"), "Mehr"),
           h("button", { type: "button", class: "btn btn-sm btn-danger", onclick: () => deleteBed(bed) }, icon("trash"), "Löschen"),
         ],
       }),
-      ...bedUsage(bed, { onPlanting: (p) => openPlantingEditor(p) }),
+      ...bedUsage(bed, { onPlanting: (p) => openPlantingOverview(p) }),
     ]);
   }
 
@@ -338,7 +339,7 @@ export function mountTimeline(root) {
     d.targetRow?.classList.remove("drop-target");
     if (!d.moved) {
       select({ type: "planting", id: d.p.id });
-      openPlantingEditor(find.planting(d.p.id));
+      openPlantingOverview(find.planting(d.p.id));
       return;
     }
     const p = d.p;

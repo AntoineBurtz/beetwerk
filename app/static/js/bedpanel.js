@@ -1,64 +1,20 @@
-// Eigenschaften eines Beets zum direkten Bearbeiten, dazu Belegung und Fruchtfolge.
-// Wird in der Seitenleiste der Karte und der Zeitleiste verwendet.
-import { state, find, patch } from "./store.js";
+// Übersicht eines Beets in der Seitenleiste (Karte, Zeitleiste): Eckdaten, Belegung und Fruchtfolge.
+import { state, find } from "./store.js";
 import {
-  h, phases, mix, clamp, fmtDay, fmtNum, yearOf, yearStart, yearLength, round2, KIND_LABEL, PLANTABLE, varietyText,
+  h, phases, mix, clamp, fmtDay, fmtNum, yearOf, yearStart, yearLength, KIND_LABEL, PLANTABLE, varietyText,
 } from "./util.js";
-import { toast, icon } from "./ui.js";
+import { icon } from "./ui.js";
 
-function num(v) {
-  const n = Number(String(v).replace(",", "."));
-  return Number.isFinite(n) ? n : null;
-}
-
-function fmtInput(v) {
-  return String(round2(v)).replace(".", ",");
-}
-
-export function bedProperties(bed, { actions = [], onClose } = {}) {
-  const commit = (changes, what) =>
-    patch("beds", bed.id, changes, { undoLabel: `${bed.name}: ${what} geändert`, silent: false }).catch(() => {});
-
-  const name = h("input", { class: "input", value: bed.name, maxlength: 80, "data-focus-key": "bed-name", "aria-label": "Name" });
-  name.addEventListener("change", () => {
-    const v = name.value.trim();
-    if (!v) { toast("Der Name darf nicht leer sein", { error: true }); name.value = bed.name; return; }
-    if (v !== bed.name) commit({ name: v }, "Name");
-  });
-  name.addEventListener("keydown", (e) => { if (e.key === "Enter") name.blur(); });
-
-  const kind = h("select", { class: "input", "data-focus-key": "bed-kind", "aria-label": "Art" },
-    Object.entries(KIND_LABEL).map(([k, label]) => h("option", { value: k, selected: k === bed.kind }, label)));
-  kind.addEventListener("change", () => commit({ kind: kind.value }, "Art"));
-
-  const sizeInput = (key, label) => {
-    const el = h("input", { class: "input", inputmode: "decimal", value: fmtInput(bed[key]), "data-focus-key": `bed-${key}`, "aria-label": label });
-    el.addEventListener("change", () => {
-      const v = num(el.value);
-      if (!(v > 0) || v > 500) { toast(`${label}: bitte eine Zahl größer als 0 eingeben`, { error: true }); el.value = fmtInput(bed[key]); return; }
-      if (round2(v) !== bed[key]) commit({ [key]: round2(v) }, label);
-    });
-    el.addEventListener("keydown", (e) => { if (e.key === "Enter") el.blur(); });
-    return el;
-  };
-  const length = sizeInput("length", "Länge");
-  const width = sizeInput("width", "Breite");
-
-  const notes = h("textarea", { class: "input", rows: 2, "data-focus-key": "bed-notes", "aria-label": "Notizen",
-    placeholder: "Bodenart, Bewässerung, Mulch …" }, bed.notes || "");
-  notes.addEventListener("change", () => { if (notes.value !== (bed.notes || "")) commit({ notes: notes.value }, "Notizen"); });
-
-  const field = (label, el) => h("label", { class: "field" }, h("span", {}, label), el);
+// Nur lesen: Name, Art, Größe, Notizen; geändert wird über „Bearbeiten“
+export function bedSummary(bed, { actions = [], onClose } = {}) {
   return h("section", { class: "panel-section bed-props" },
     h("div", { class: "panel-title" },
       h("h2", {}, bed.name),
       onClose ? h("button", { type: "button", class: "icon-btn", "aria-label": "Schließen", title: "Schließen", onclick: onClose },
         icon("close")) : null),
-    h("p", { class: "muted small", style: { margin: 0 } },
-      `${KIND_LABEL[bed.kind]}, ${fmtNum(bed.length * bed.width)} m²`),
-    field("Name", name),
-    h("div", { class: "bed-props-grid" }, field("Art", kind), field("Länge (m)", length), field("Breite (m)", width)),
-    field("Notizen", notes),
+    h("p", { class: "muted", style: { margin: 0 } },
+      `${KIND_LABEL[bed.kind]} · ${fmtNum(bed.length)} × ${fmtNum(bed.width)} m · ${fmtNum(bed.length * bed.width)} m²`),
+    bed.notes ? h("p", { class: "small", style: { margin: 0, whiteSpace: "pre-wrap" } }, bed.notes) : null,
     actions.length ? h("div", { class: "actions" }, actions) : null);
 }
 
