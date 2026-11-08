@@ -5,6 +5,7 @@ import {
   isMixed, mixPlan, varietyText, varietyNames,
 } from "./util.js";
 import { openPlantingEditor } from "./editor.js";
+import { openPlantingOverview } from "./overview.js";
 import { goalsSection, openGoalEditor } from "./goals.js";
 
 let filter = "";
@@ -85,7 +86,7 @@ export function mountPlantings(root) {
       h("span", { class: "date num" }, fmtDay(t.d)),
       h("span", { class: "verb" }, t.verb),
       h("span", { class: "what" },
-        h("button", { type: "button", style: { all: "unset", cursor: "pointer" }, onclick: () => openPlantingEditor(t.p) },
+        h("button", { type: "button", style: { all: "unset", cursor: "pointer" }, onclick: () => openPlantingOverview(t.p) },
           c?.name ?? "Kultur", varietyText(t.p) ? h("span", { class: "muted" }, ` ${varietyText(t.p)}`) : null)),
       h("span", { class: "where" }, bed ? `${t.flag === "sown_done" && t.p.method === "transplant" ? "für " : ""}${bed.name}` : "Ohne Beet"));
   }
@@ -135,8 +136,8 @@ export function mountPlantings(root) {
         const issueKind = issues.some((i) => i.kind === "conflict") ? "conflict" : issues.length ? "rotation" : null;
         return h("tr", {
           tabindex: "0",
-          onclick: () => { select({ type: "planting", id: p.id }); openPlantingEditor(p); },
-          onkeydown: (e) => { if (e.key === "Enter") openPlantingEditor(p); },
+          onclick: () => { select({ type: "planting", id: p.id }); openPlantingOverview(p); },
+          onkeydown: (e) => { if (e.key === "Enter") openPlantingOverview(p); },
         },
           h("td", {}, h("div", { class: "crop-cell" }, h("span", { class: "dot", style: { background: color } }),
             h("span", {}, c?.name ?? "Kultur"), varietyText(p)

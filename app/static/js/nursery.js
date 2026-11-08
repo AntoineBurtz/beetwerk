@@ -5,6 +5,7 @@ import { h, fmtDay, dayNum, isoOf, isoWeek, yearOf, plural, fmtNum, todayNum } f
 import { toast, confirmDialog, icon, iconBtn, replaceKeepingFocus } from "./ui.js";
 import { shell, field, openCropEditor } from "./editor.js";
 import { openGoalEditor } from "./goals.js";
+import { openCropOverview, openPlantingOverview, link } from "./overview.js";
 
 const VERB = { sow: "Aussäen", prick: "Pikieren", harden: "Abhärten", plant: "Auspflanzen", handover: "Abgeben" };
 const STATUS = { wish: "gewünscht", promised: "zugesagt", done: "abgeholt", cancelled: "abgesagt" };
@@ -296,8 +297,55 @@ export function mountNursery(root) {
     return out;
   }
 
+  // Übersicht einer Anzucht: Termine, Rechnung, für wen, Stand. Eintragen erst per Knopf.
   function openBatch(b0) {
     const b = byKey().get(b0.key) || b0;
+    const crop = find.crop(b.crop_id);
+    const st = b.state || {};
+    const ui = shell(title(b), {
+      extraHead: h("span", { class: "var-head-crop" }, crop ? link(crop.name, () => openCropOverview(crop), { dot: crop.color }) : null,
+        ` · Aussaat ${kw(b.sow_date)}`),
+      onSubmit: () => { openBatchEditor(b, () => { ui.dlg.close(); const fresh = byKey().get(b.key); if (fresh) openBatch(fresh); }); return false; },
+    });
+    ui.dlg.classList.add("var-detail");
+    const dates = [["Aussaat", b.sow_date], ["Pikieren", b.prick_date], ["Abhärten ab", b.harden_date],
+      [b.own.length ? "Pflanzung" : "Abholung", b.ready_date]].filter(([, d]) => d);
+    const who = [
+      ...b.own.map((o) => h("li", {}, h("strong", {}, o.count), " für ",
+        link(o.bed || "Satz ohne Beet", () => { const p = find.planting(o.planting_id); if (p) openPlantingOverview(p); }, { title: "Satz ansehen" }),
+        h("span", { class: "muted" }, ` · pflanzen ${weekday(o.plant_date)} ${day(o.plant_date)}`))),
+      ...b.friends.map((f) => h("li", {}, h("strong", {}, f.count), ` für ${f.person}`,
+        h("span", { class: "muted" }, ` · abholen ${weekday(f.pickup_date)} ${day(f.pickup_date)} · ${STATUS[f.status]}`))),
+    ];
+    const steps = [["gesät", b.sown], b.prick_date ? ["pikiert", b.pricked] : null, b.harden_date ? ["abgehärtet", b.hardened] : null].filter(Boolean);
+    const place = find.place(st.place_id) || (crop && find.place(crop.place_id));
+    const grow = find.place(st.grow_place_id) || (crop && find.place(crop.grow_place_id));
+    ui.body.append(
+      h("dl", { class: "var-facts nursery-dates" }, dates.map(([l, d]) => h("div", {}, h("dt", {}, l), h("dd", {}, `${weekday(d)} ${day(d, { year: true })}`)))),
+      h("section", { class: "var-block" }, h("h3", {}, "Rechnung"),
+        h("ul", { class: "calc" },
+          h("li", {}, forText(b)),
+          h("li", {}, `${b.germination} % Keimrate → ${sowText(b)}`),
+          b.pot ? h("li", {}, `nach ${crop?.prick_days ?? "?"} Tagen pikieren: ${containerText(b.pot, b.target)}`) : null,
+          h("li", { class: "muted" }, `Plattenplätze: ${num(b.sow?.slots || 0)} bei der Aussaat${b.pot ? `, ${num(b.pot.slots)} nach dem Pikieren` : ""}`))),
+      h("section", { class: "var-block" }, h("h3", {}, "Für wen"), h("ul", { class: "calc" }, who)),
+      h("section", { class: "var-block" }, h("h3", {}, "Stand"),
+        h("ul", { class: "steps" }, steps.map(([label, done]) => h("li", { class: done ? "done" : "" }, label))),
+        h("dl", { class: "var-facts" },
+          h("div", {}, h("dt", {}, "Gesät"), h("dd", {}, st.seeds_sown != null ? `${st.seeds_sown} Körner` : `geplant ${b.seeds} Körner`)),
+          h("div", {}, h("dt", {}, "Jungpflanzen"), h("dd", {}, b.have != null ? `${b.have} vorhanden${st.plants_raised == null ? " (geschätzt aus der Keimrate)" : ""}` : `gebraucht ${b.need}, mit Reserve ${b.target}`)),
+          h("div", {}, h("dt", {}, "Platz"), h("dd", {}, place ? `${place.name}${b.pot && grow && grow.id !== place.id ? `, dann ${grow.name}` : ""}` : "–"))),
+        b.short > 0 ? h("p", { class: "form-error", style: { margin: 0 } }, `Es fehlen ${b.short} Pflanzen für den Bedarf.`) : null,
+        st.notes ? h("p", { class: "var-notes" }, st.notes) : null));
+    ui.foot.append(
+      h("span", { class: "spacer" }),
+      h("button", { type: "button", class: "btn btn-quiet", onclick: () => ui.dlg.close() }, "Schließen"),
+      h("button", { type: "submit", class: "btn btn-primary" }, icon("edit"), "Stand eintragen"));
+    ui.open();
+  }
+
+  // Was wirklich passiert ist: Häkchen, Anzahlen, Platz, Notizen
+  function openBatchEditor(b, onSaved) {
     const crop = find.crop(b.crop_id);
     const st = b.state || {};
     const numIn = (v) => h("input", { inputmode: "numeric", value: v ?? "", placeholder: "–" });
@@ -323,8 +371,7 @@ export function mountNursery(root) {
       if (!Number.isInteger(n) || n < 0) throw new Error(`${label}: bitte eine ganze Zahl eingeben`);
       return n;
     };
-    const ui = shell(title(b), {
-      extraHead: h("span", { class: "var-head-crop" }, `Aussaat ${kw(b.sow_date)}`),
+    const ui = shell(`${title(b)}: Stand`, {
       onSubmit: async () => {
         const changes = {
           seeds_sown: intOf(seeds, "Gesät"), plants_raised: intOf(raised, "Jungpflanzen vorhanden"),
@@ -335,34 +382,17 @@ export function mountNursery(root) {
         if (pricked.input.checked !== b.pricked) changes.pricked_done = pricked.input.checked;
         if (hardened.input.checked !== b.hardened) changes.hardened_done = hardened.input.checked;
         await saveBatch(b.key, changes);
+        onSaved?.();
       },
     });
-    const dates = [["Aussaat", b.sow_date], ["Pikieren", b.prick_date], ["Abhärten ab", b.harden_date],
-      [b.own.length ? "Pflanzung" : "Abholung", b.ready_date]].filter(([, d]) => d);
-    const who = [
-      ...b.own.map((o) => h("li", {}, h("strong", {}, o.count), ` für ${o.bed || "Satz ohne Beet"}`,
-        h("span", { class: "muted" }, ` · pflanzen ${weekday(o.plant_date)} ${day(o.plant_date)}`))),
-      ...b.friends.map((f) => h("li", {}, h("strong", {}, f.count), ` für ${f.person}`,
-        h("span", { class: "muted" }, ` · abholen ${weekday(f.pickup_date)} ${day(f.pickup_date)} · ${STATUS[f.status]}`))),
-    ];
     ui.body.append(
-      h("dl", { class: "var-facts nursery-dates" }, dates.map(([l, d]) => h("div", {}, h("dt", {}, l), h("dd", {}, `${weekday(d)} ${day(d, { year: true })}`)))),
-      h("section", { class: "var-block" }, h("h3", {}, "Rechnung"),
-        h("ul", { class: "calc" },
-          h("li", {}, forText(b)),
-          h("li", {}, `${b.germination} % Keimrate → ${sowText(b)}`),
-          b.pot ? h("li", {}, `nach ${crop?.prick_days ?? "?"} Tagen pikieren: ${containerText(b.pot, b.target)}`) : null,
-          h("li", { class: "muted" }, `Plattenplätze: ${num(b.sow?.slots || 0)} bei der Aussaat${b.pot ? `, ${num(b.pot.slots)} nach dem Pikieren` : ""}`))),
-      h("section", { class: "var-block" }, h("h3", {}, "Für wen"), h("ul", { class: "calc" }, who)),
-      h("section", { class: "var-block" }, h("h3", {}, "Was wirklich passiert ist"),
-        h("div", { class: "nursery-flags" }, sown.el, b.pot ? pricked.el : null, b.harden_date ? hardened.el : null),
-        h("div", { class: "grid-2" }, field("Gesät (Körner)", seeds, `geplant ${b.seeds}`),
-          field("Jungpflanzen vorhanden", raised, `gebraucht ${b.need}, geplant mit Reserve ${b.target}`)),
-        b.short > 0 ? h("p", { class: "form-error", style: { margin: 0 } }, `Es fehlen ${b.short} Pflanzen für den Bedarf.`) : null,
-        h("div", { class: "grid-2" }, field("Platz bei der Aussaat", place), b.pot ? field("Platz nach dem Pikieren", grow) : null),
-        field("Notizen", notes)));
+      h("div", { class: "nursery-flags" }, sown.el, b.pot ? pricked.el : null, b.harden_date ? hardened.el : null),
+      h("div", { class: "grid-2" }, field("Gesät (Körner)", seeds, `geplant ${b.seeds}`),
+        field("Jungpflanzen vorhanden", raised, `gebraucht ${b.need}, geplant mit Reserve ${b.target}`)),
+      h("div", { class: "grid-2" }, field("Platz bei der Aussaat", place), b.pot ? field("Platz nach dem Pikieren", grow) : null),
+      field("Notizen", notes));
     ui.foot.append(
-      crop ? h("button", { type: "button", class: "btn", onclick: () => { ui.dlg.close(); openCropEditor(crop); } }, "Kultur einstellen") : null,
+      crop ? h("button", { type: "button", class: "btn", onclick: () => openCropEditor(crop) }, "Kultur einstellen") : null,
       h("span", { class: "spacer" }),
       h("button", { type: "button", class: "btn btn-quiet", onclick: () => ui.dlg.close() }, "Abbrechen"),
       h("button", { type: "submit", class: "btn btn-primary" }, "Speichern"));
@@ -621,7 +651,7 @@ export function mountNursery(root) {
     const used = new Set(plan.batches.map((b) => b.crop_id));
     const crops = state.crops.filter((c) => c.method === "transplant" || used.has(c.id))
       .sort((a, b) => Number(used.has(b.id)) - Number(used.has(a.id)) || a.name.localeCompare(b.name, "de"));
-    const rows = crops.map((c) => h("tr", { tabindex: "0", onclick: () => openCropEditor(c), onkeydown: (e) => { if (e.key === "Enter") openCropEditor(c); } },
+    const rows = crops.map((c) => h("tr", { tabindex: "0", onclick: () => openCropOverview(c), onkeydown: (e) => { if (e.key === "Enter") openCropOverview(c); } },
       h("td", {}, h("div", { class: "crop-cell" }, h("span", { class: "dot", style: { background: c.color } }), c.name,
         used.has(c.id) ? h("span", { class: "v" }, year) : null)),
       h("td", {}, find.container(c.sow_container_id)?.name || h("span", { class: "muted" }, "fehlt")),

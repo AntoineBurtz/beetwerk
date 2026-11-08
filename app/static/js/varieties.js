@@ -5,6 +5,7 @@ import { toast, confirmDialog, icon } from "./ui.js";
 import { shell, field } from "./editor.js";
 import { shrinkPhoto } from "./bwidgets.js";
 import { profileForm, profileView, cardTraits, SOURCE_LABEL } from "./profileform.js";
+import { cropLink, link, openPlantingOverview } from "./overview.js";
 
 let query = "";
 let cropFilter = "";
@@ -132,6 +133,10 @@ function usage() {
 function missingFromPlantings() {
   const have = new Set(state.varieties.map((v) => `${v.crop_id}|${v.name.trim().toLowerCase()}`));
   return [...usage().keys()].filter((k) => !have.has(k) && !k.endsWith("|")).length;
+}
+
+export function varietyThumb(v, crop) {
+  return thumb(v, crop);
 }
 
 function thumb(v, crop) {
@@ -277,7 +282,7 @@ export function openVarietyDetail(variety, after) {
   const reopen = () => { after?.(); back(); };
 
   const ui = shell(v.name, {
-    extraHead: h("span", { class: "var-head-crop" }, h("span", { class: "dot", style: { background: crop?.color } }), crop?.name || "ohne Kultur"),
+    extraHead: h("span", { class: "var-head-crop" }, crop ? cropLink(crop) : "ohne Kultur"),
     onSubmit: () => { openVarietyEditor(v, reopen, null, { onCancel: back }); },
   });
   ui.dlg.classList.add("var-detail");
@@ -305,10 +310,14 @@ export function openVarietyDetail(variety, after) {
     const start = p.plant_date || p.sow_date;
     return h("li", {},
       h("strong", {}, start.slice(0, 4)),
-      h("span", {}, find.bed(p.bed_id)?.name || "ohne Beet", count ? ` · ${plural(count, "Pflanze", "Pflanzen")}` : ""),
+      h("span", {}, link(find.bed(p.bed_id)?.name || "ohne Beet", () => openPlantingOverview(p), { title: "Satz ansehen" }),
+        count ? ` · ${plural(count, "Pflanze", "Pflanzen")}` : ""),
       h("span", { class: "muted" }, `${p.plant_date ? "gepflanzt" : "gesät"} ${fmtDay(dayNum(start))}`
         + ` · Ernte ${fmtDay(dayNum(p.harvest_start))} bis ${fmtDay(dayNum(p.harvest_end))}`));
   })) : null;
+  const vkey = v.name.trim().toLowerCase();
+  const wishes = state.handovers.filter((x) => x.crop_id === v.crop_id && x.status !== "cancelled"
+    && x.variety.trim().toLowerCase() === vkey);
 
   ui.body.append(
     h("div", { class: "var-top" }, photo,
@@ -318,6 +327,10 @@ export function openVarietyDetail(variety, after) {
         nothing ? h("p", { class: "muted small", style: { margin: 0 } }, "Art, Typ und Beschreibung sind noch leer.") : null)),
     block("Merkmale", profBox),
     usesList ? block(`In ${plural(uses.length, "Satz", "Sätzen")}`, usesList) : null,
+    wishes.length ? block("Für Freunde", h("ul", { class: "var-uses" }, wishes.map((x) => h("li", {},
+      h("strong", {}, x.pickup_date.slice(0, 4)),
+      h("span", {}, `${plural(x.count, "Pflanze", "Pflanzen")} für ${find.person(x.person_id)?.name || "?"}`),
+      h("span", { class: "muted" }, `abholen ${fmtDay(dayNum(x.pickup_date))} · ${{ wish: "gewünscht", promised: "zugesagt", done: "abgeholt" }[x.status] || ""}`))))) : null,
     v.links?.length ? block("Quellen", h("ul", { class: "var-src" }, v.links.map((l) => h("li", {},
       h("a", { href: l.url, target: "_blank", rel: "noopener" }, l.title || l.url))))) : null,
     v.notes ? block("Notizen", h("p", { class: "var-notes" }, v.notes)) : null,

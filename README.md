@@ -133,7 +133,15 @@ In „Beetwerk-Sorten“ stehen die Merkmale so, wie Beetwerk sie bei der Sorte 
 
 `BEETWERK_BASEROW_DELAY` (Sekunden, Standard 15) ändert die Wartezeit nach einer Änderung; `0` schaltet den automatischen Abgleich ab.
 
-## Sortenliste und Saatgut-Recherche
+## Kulturen, Sorten und Saatgut-Recherche
+
+### Kulturen
+
+Ein Klick auf eine Kultur öffnet ihre Übersicht: Anbau, Kulturdauer, Abstände (mit Pflanzen je m²), Fruchtfolge, Bonitur-Merkmale, die Anzucht-Einstellungen, **alle Sorten der Kultur** als Karten mit Merkmalen (Klick öffnet die Sorte), die Sätze des Jahres, Ernteziele und was Freunde davon bekommen. Sorten, die in Sätzen stehen, aber noch nicht in der Sortenliste, nimmt „In die Sortenliste aufnehmen“ auf. „+ Sorte“ und „+ Satz“ legen gleich für diese Kultur an. Die Tabelle der Kulturen zählt Sorten und Sätze.
+
+Die Übersicht eines **Satzes** zeigt Ablauf (gesät, gepflanzt, geerntet), Beet, Fläche, Pflanzenzahl, die Sorte mit ihren Merkmalen, das Ernteziel, zu dem er gehört, und Hinweise zur Fruchtfolge; dazu „Auf der Karte“, „Folgesatz“ und „Bonitieren“. Steht eine Sorte des Satzes noch nicht in der Sortenliste, lässt sie sich dort mit einem Klick aufnehmen. Die Übersicht eines **Beets** zeigt Art, Größe, Notizen, Belegung des Jahres und die Fruchtfolge der letzten Jahre.
+
+### Sorten
 
 Unter **Kulturen → Sorten** steht die Sortenliste: Kultur, botanische Art, Typ, Saatgut (samenfest oder F1), Bezugsquelle, Beschreibung, Merkmale, Foto mit Bildquelle und Quellen. Ein Klick auf eine Sorte öffnet ihre Übersicht zum Lesen: Foto, Art, Typ, Saatgut, Bezugsquelle, Beschreibung, Merkmale mit Herkunft, die Sätze mit dieser Sorte, Quellen und Notizen. Ändern lässt sich erst nach „Bearbeiten“; nach dem Speichern oder Abbrechen geht es zurück zur Übersicht. „Aus Sätzen übernehmen“ legt alle Sorten an, die schon in deinen Sätzen stehen. Im Satz-Dialog schlägt Beetwerk die Sorten der gewählten Kultur vor.
 
@@ -157,7 +165,7 @@ Die Seite **Anzucht** rechnet aus der Beetplanung, was wann gesät werden muss. 
 
 - **Rechnung:** Bedarf (Beete + Freunde) plus Reserve der Kultur (Standard 20 %) ergibt die Jungpflanzen. Daraus mit der Keimrate die Körner: bei Breitsaat in die Saatschale so viele, dass genug keimen; bei Zellen und Töpfen so viele Zellen, dass in genug davon mindestens ein Korn aufgeht (bei 2 Körnern je Zelle und 80 % Keimrate also 96 % der Zellen). Mehr als ein Korn je Zelle passt auch für Horste wie Basilikum.
 - **Wochenplan:** je Kalenderwoche Aussäen, Pikieren, Abhärten, Auspflanzen und Abgeben, zum Abhaken. „Gesät“ überträgt sich auf die Sätze (ein Mischsatz ist gesät, wenn alle seine Sorten gesät sind), Auspflanzen ist das Häkchen des Satzes, Abgeben setzt den Wunsch auf „abgeholt“. Beim Öffnen springt die Seite zur aktuellen Woche.
-- **Anzuchten:** Tabelle mit Aussaat, Bedarf, Jungpflanzen, Körnern, Gefäß und Platz. Im Dialog trägst du ein, was wirklich gesät wurde und wie viele Jungpflanzen da sind; fehlen Pflanzen für den Bedarf, steht das oben im Wochenplan.
+- **Anzuchten:** Tabelle mit Aussaat, Bedarf, Jungpflanzen, Körnern, Gefäß und Platz. Ein Klick zeigt die Übersicht mit Terminen, Rechnung, für wen und Stand; unter „Stand eintragen“ hältst du fest, was wirklich gesät wurde und wie viele Jungpflanzen da sind. Fehlen Pflanzen für den Bedarf, steht das oben im Wochenplan.
 - **Abgaben an Freunde:** Person, Kultur, Sorte (leer = egal), Anzahl, Abholtermin und Stand (gewünscht, zugesagt, abgeholt, abgesagt). Die Pflanzen laufen in der Anzucht derselben Sorte mit, wenn deren Pflanztermin höchstens zwei Wochen nach und vier Wochen vor der Abholung liegt; bei offener Sorte in der größten passenden. Passt keine, bekommt der Wunsch eine eigene Anzucht (Abholung minus Anzuchtdauer). Die Abholliste ist nach Termin sortiert.
 - **Plätze und Belegung:** Lege deine Anzuchtplätze mit Plattenplätzen an (ein Plattenplatz ist eine Standardplatte, etwa 30 × 50 cm). Die Belegung zeigt je Woche, wie viele Plattenplätze belegt sind, bis die Pflanzen zum Abhärten rausgehen; zu volle Wochen sind rot und stehen oben im Wochenplan.
 - **Gefäße:** Saatschale (Körner je Schale), Multitopfplatten (Zellen je Platte) und Töpfe, jeweils mit „je Plattenplatz“ (z. B. 15 Töpfe 9 cm). Sechs gängige sind angelegt.
@@ -265,14 +273,15 @@ BEETWERK_DATA=./data uvicorn app.main:app --host 0.0.0.0 --port 8000
 |---|---|
 | Karte | Beet anklicken und ziehen verschiebt es (10-cm-Raster). Griffe rechts und unten ändern die Größe, der runde Griff oben dreht (15°-Schritte, mit Umschalt 1°). |
 | Karte | Kultur aus der Seitenleiste auf ein Beet ziehen legt einen Satz an. Termine werden aus den Kulturdaten so berechnet, dass der Satz am Stichtag ins Beet kommt. |
-| Karte | Satz anklicken und ziehen verschiebt ihn im Beet, die vier Griffe ändern Länge und Breite. Pfeiltasten verschieben um 10 cm (mit Umschalt 1 m), Entf löscht, Eingabe öffnet den Dialog. |
+| Karte | Satz anklicken und ziehen verschiebt ihn im Beet, die vier Griffe ändern Länge und Breite. Pfeiltasten verschieben um 10 cm (mit Umschalt 1 m), Entf löscht, Eingabe öffnet den Dialog. Die Seitenleiste zeigt die Übersicht des gewählten Beets oder Satzes; Kultur und Sorten darin führen zu ihren Übersichten. |
 | Karte | Gestrichelte Flächen: Sätze, die in den nächsten drei Wochen ins Beet kommen. Jungpflanzen in Anzucht stehen in der Seitenleiste. |
 | Karte | Ebenen-Symbol links blendet das Luftbild ein oder aus. Darunter zeigt der Pfeil nach Norden. |
 | Karte | **+** unten rechts: Art der Fläche wählen (Beet, Hochbeet, Gewächshaus, Weg, Sonstiges) und auf der Karte aufziehen; Antippen legt eine Fläche in Standardgröße an. Mehrere nacheinander möglich, „Fertig“ beendet. |
 | Karte | Sätze ohne Beet (z. B. aus der Zeitleiste ohne Beet angelegt) zeigt ein Hinweis oben rechts. In der Seitenleiste lassen sie sich auf ein Beet ziehen oder antippen und dann aufs Beet tippen. |
 | Zeitleiste | Balken waagerecht ziehen verschiebt alle Termine, senkrecht in eine andere Zeile wechselt das Beet. Rechte Kante ändert das Ernteende, linke Kante den Aussaattermin. |
 | Zeitleiste | Klick auf eine freie Stelle legt dort einen neuen Satz an. Klick in den Kopf setzt den Stichtag. |
-| Zeitleiste | Klick auf den Beetnamen links öffnet rechts die Eigenschaften des Beets (Name, Art, Länge, Breite, Notizen) zum direkten Bearbeiten, dazu Belegung und Fruchtfolge. Esc oder × schließt. |
+| Zeitleiste | Klick auf einen Balken öffnet die Übersicht des Satzes. Klick auf den Beetnamen links zeigt rechts die Übersicht des Beets (Art, Größe, Notizen, Belegung, Fruchtfolge); „Bearbeiten“ öffnet das Formular. Esc oder × schließt. |
+| Überall | **Erst Übersicht, dann Bearbeiten:** Ein Klick auf eine Kultur, ein Beet, eine Sorte, einen Satz oder eine Anzucht zeigt eine Übersicht zum Lesen; geändert wird erst nach „Bearbeiten“ bzw. „Stand eintragen“. Unterstrichene Namen in einer Übersicht (Kultur, Sorte, Beet, Satz) öffnen deren Übersicht darüber, „Schließen“ oder Esc führt zurück. Nach dem Speichern zeigen offene Übersichten gleich den neuen Stand. |
 | Überall | `[` und `]` springen eine Woche zurück oder vor, Strg+Z macht die letzte Änderung rückgängig. |
 
 ### Begriffe

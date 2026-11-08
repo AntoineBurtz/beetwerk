@@ -15,6 +15,7 @@ import {
 } from "./bstore.js";
 import { widget } from "./bwidgets.js";
 import { baserowStatus, statusChip, syncNow } from "./baserowsetup.js";
+import { link, openPlantingOverview } from "./overview.js";
 
 function readSession(key) {
   try { return JSON.parse(sessionStorage.getItem(`beetwerk.${key}`)); } catch { return null; }
@@ -322,7 +323,7 @@ export function mountBonitur(root) {
       h("button", { type: "button", class: "btn btn-quiet btn-sm bon-back", onclick: () => { openPlanting(null); render(); } },
         icon("left"), "Alle Sätze"),
       h("div", { class: "bon-title" },
-        h("h2", {}, h("span", { class: "dot", style: { background: crop?.color } }), crop?.name ?? "Kultur",
+        h("h2", {}, link(crop?.name ?? "Kultur", () => openPlantingOverview(p), { dot: crop?.color, title: "Übersicht des Satzes" }),
           varietyText(p) ? h("span", { class: "v" }, varietyText(p)) : null),
         h("span", { class: "muted small" }, [bed?.name || "ohne Beet",
           ph.plant != null ? `gepflanzt ${fmtDay(ph.plant, { year: true })}` : `gesät ${fmtDay(ph.sow, { year: true })}`,
