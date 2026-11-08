@@ -4,6 +4,7 @@ import { state, api, find, create, patch, remove, subscribe, emit } from "./stor
 import { h, fmtDay, dayNum, isoOf, isoWeek, yearOf, plural, fmtNum, todayNum } from "./util.js";
 import { toast, confirmDialog, icon, iconBtn, replaceKeepingFocus } from "./ui.js";
 import { shell, field, openCropEditor } from "./editor.js";
+import { openGoalEditor } from "./goals.js";
 
 const VERB = { sow: "Aussäen", prick: "Pikieren", harden: "Abhärten", plant: "Auspflanzen", handover: "Abgeben" };
 const STATUS = { wish: "gewünscht", promised: "zugesagt", done: "abgeholt", cancelled: "abgesagt" };
@@ -134,8 +135,8 @@ export function mountNursery(root) {
         h("strong", { class: "num" }, String(year)),
         iconBtn("right", "Jahr vor", () => { year += 1; plan = null; jump = true; render(); load(); })),
       h("div", { class: "seg", role: "radiogroup", "aria-label": "Ansicht" },
-        opt("plan", "Wochenplan"), opt("batches", ["Anzuchten", n ? h("span", { class: "seg-count" }, ` (${n})`) : null]),
-        opt("friends", ["Abgaben", wishes ? h("span", { class: "seg-count" }, ` (${wishes})`) : null]), opt("places", "Plätze")));
+        opt("plan", "Wochenplan"), opt("batches", ["Anzuchten", n ? h("span", { class: "seg-count" }, `\u00a0(${n})`) : null]),
+        opt("friends", ["Abgaben", wishes ? h("span", { class: "seg-count" }, `\u00a0(${wishes})`) : null]), opt("places", "Plätze")));
   }
 
   function render() {
@@ -193,7 +194,8 @@ export function mountNursery(root) {
   function planView() {
     if (!plan.batches.length) {
       return h("div", { class: "empty-note" },
-        `Für ${year} gibt es noch keine Anzucht. Sie entsteht aus den Sätzen mit „Anzucht und Pflanzung“ und aus den Wünschen deiner Freunde.`,
+        `Für ${year} gibt es noch keine Anzucht. Sie entsteht aus den Sätzen mit „Anzucht und Pflanzung“, aus Erntezielen und aus den Wünschen deiner Freunde. `,
+        h("button", { type: "button", class: "link", onclick: () => openGoalEditor(null, { year }) }, "Ernteziel planen"),
         plan.years.length ? h("div", { style: { marginTop: "8px" } }, "Anzucht gibt es in: ",
           plan.years.flatMap((y, i) => [i ? ", " : "", h("button", { type: "button", class: "link",
             onclick: () => { year = Number(y); plan = null; jump = true; render(); load(); } }, y)])) : null);
@@ -225,7 +227,9 @@ export function mountNursery(root) {
     return h("div", { class: "section" },
       ...notices(),
       h("div", { class: "section-head" }, h("h2", {}, `Wochenplan ${year}`),
-        h("span", { class: "muted small" }, "Aus den Sätzen mit Anzucht und den Wünschen deiner Freunde"), toggle),
+        h("span", { class: "muted small" }, "Aus den Sätzen mit Anzucht und den Wünschen deiner Freunde"), toggle,
+        h("button", { type: "button", class: "btn btn-sm", title: "Folgesätze aus der gewünschten Erntemenge je Woche",
+          onclick: () => openGoalEditor(null, { year }) }, "Ernteziel planen")),
       list.length ? list : h("div", { class: "empty-note" }, "Alles erledigt."));
   }
 

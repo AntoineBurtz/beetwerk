@@ -5,6 +5,7 @@ import {
   isMixed, mixPlan, varietyText, varietyNames,
 } from "./util.js";
 import { openPlantingEditor } from "./editor.js";
+import { goalsSection, openGoalEditor } from "./goals.js";
 
 let filter = "";
 
@@ -18,8 +19,10 @@ export function mountPlantings(root) {
     const inner = h("div", { class: "page-inner" },
       h("div", { class: "page-head" },
         h("h1", {}, `Sätze ${year}`),
+        h("button", { type: "button", class: "btn", onclick: () => openGoalEditor(null, { year }) }, "Ernteziel"),
         h("button", { type: "button", class: "btn btn-primary", onclick: () => openPlantingEditor(null, { anchor: state.day }) }, "Neuer Satz")),
       tasksSection(),
+      goalsSection(year),
       listSection(year),
       demandSection(year));
     page.replaceChildren(inner);

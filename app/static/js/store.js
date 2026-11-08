@@ -46,6 +46,7 @@ export const state = {
   places: [], // Anzuchtplätze
   people: [], // Freunde, die Jungpflanzen bekommen
   handovers: [], // ihre Wünsche
+  goals: [], // Ernteziele für Folgesätze
   day: initialDay(),
   sel: null, // { type: "bed" | "planting", id }
   // Modus der Karte: Kultur setzen, Satz ohne Beet zuweisen oder neue Fläche aufziehen

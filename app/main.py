@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import baserow, bonitur, db, geo, nursery, profile, research, varieties, weather
+from . import baserow, bonitur, db, geo, goals, nursery, profile, research, varieties, weather
 from .seed import guess_trait_groups, seed_demo
 
 VERSION = "1.1.0"
@@ -361,6 +361,7 @@ def all_data():
             "plantings": [_planting_out(p) for p in db.rows(conn, "SELECT * FROM plantings ORDER BY sow_date, id")],
             "varieties": [varieties.variety_out(v) for v in db.rows(conn, "SELECT * FROM varieties ORDER BY name COLLATE NOCASE")],
             **nursery.lists(conn),
+            **goals.lists(conn),
         }
 
 
@@ -439,6 +440,9 @@ def delete_crop(crop_id: int):
         listed = conn.execute("SELECT COUNT(*) FROM varieties WHERE crop_id = ?", (crop_id,)).fetchone()[0]
         if listed:
             _err(409, f"Zu dieser Kultur stehen noch {listed} {'Sorte' if listed == 1 else 'Sorten'} in der Sortenliste")
+        aimed = conn.execute("SELECT COUNT(*) FROM goals WHERE crop_id = ?", (crop_id,)).fetchone()[0]
+        if aimed:
+            _err(409, f"Für diese Kultur gibt es noch {aimed} {'Ernteziel' if aimed == 1 else 'Ernteziele'}")
         wished = conn.execute("SELECT COUNT(*) FROM handovers WHERE crop_id = ?", (crop_id,)).fetchone()[0]
         if wished:
             _err(409, f"Für diese Kultur gibt es noch {wished} {'Wunsch' if wished == 1 else 'Wünsche'} von Freunden")
@@ -562,6 +566,7 @@ async def import_all(request: Request):
     with db.session() as conn:
         bonitur.clear_tables(conn)
         nursery.clear_tables(conn)
+        conn.execute("DELETE FROM goals")
         conn.execute("DELETE FROM plantings")
         conn.execute("DELETE FROM beds")
         conn.execute("DELETE FROM varieties")
@@ -573,7 +578,7 @@ async def import_all(request: Request):
             if key in NOT_EXPORTED:
                 continue
             conn.execute("INSERT INTO settings(key, value) VALUES (?, ?)", (key, str(value)))
-        for table in ("containers", "places", "crops", "varieties", "beds", "plantings", *nursery.BACKUP_TABLES[2:]):
+        for table in ("containers", "places", "crops", "goals", "varieties", "beds", "plantings", *nursery.BACKUP_TABLES[2:]):
             cols = {r["name"] for r in db.rows(conn, f"PRAGMA table_info({table})")}
             for item in data.get(table) or []:
                 record = {k: v for k, v in item.items() if k in cols}
@@ -604,6 +609,7 @@ def load_demo(replace: bool = False):
         if has_beds and not replace:
             _err(409, "Es gibt schon Beete. Zum Ersetzen replace=true mitschicken.")
         bonitur.clear_tables(conn)
+        conn.execute("DELETE FROM goals")
         conn.execute("DELETE FROM plantings")
         conn.execute("DELETE FROM beds")
         if not geo.loads(_settings(conn).get("geo")):
@@ -702,4 +708,5 @@ app.include_router(bonitur.router)
 app.include_router(baserow.router)
 app.include_router(varieties.router)
 app.include_router(nursery.router)
+app.include_router(goals.router)
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
