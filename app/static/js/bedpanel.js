@@ -57,8 +57,9 @@ export function rotationHistory(bed, year) {
   return grid;
 }
 
-export function miniTimeline(p, year) {
-  const ys = yearStart(year), len = yearLength(year);
+// Satz als schmaler Balken über ein Jahr oder über einen eigenen Bereich { ys, len }
+export function miniTimeline(p, year, range = null) {
+  const ys = range ? range.ys : yearStart(year), len = range ? range.len : yearLength(year);
   const ph = phases(p);
   const c = find.crop(p.crop_id);
   const color = c?.color || "#6a9b3c";

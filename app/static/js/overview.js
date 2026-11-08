@@ -1,17 +1,17 @@
 // Übersichten zum Lesen: Kultur, Beet und Satz. Geändert wird erst nach „Bearbeiten“.
 // Namen sind Verweise: Kultur, Beet, Sorte und Satz öffnen ihre Übersicht über der aktuellen;
 // „Schließen“ führt zurück. Offene Übersichten zeigen nach dem Speichern gleich den neuen Stand.
-import { state, api, find, subscribe, select, issuesOf, create, setDay } from "./store.js";
+import { state, api, find, subscribe, select, issuesOf, create, setDay, emit } from "./store.js";
 import {
   h, phases, fmtDay, fmtNum, plural, yearOf, yearStart, yearLength, isMixed, varietyText, plantCount, rowCount,
-  spanOf, spacing, mixPlan, KIND_LABEL, PLANTABLE, isoWeek, dayNum, onBedAt,
+  spanOf, spacing, mixPlan, KIND_LABEL, PLANTABLE, isoWeek, dayNum, onBedAt, isoOf, monthStarts, MONTHS_SHORT,
 } from "./util.js";
 import { icon, toast } from "./ui.js";
 import { shell, openCropEditor, openBedEditor, openPlantingEditor, createSuccession } from "./editor.js";
 import { miniTimeline, rotationHistory } from "./bedpanel.js";
 import { openVarietyDetail, openVarietyEditor, varietyThumb } from "./varieties.js";
 import { cardTraits } from "./profileform.js";
-import { openGoalEditor } from "./goals.js";
+import { openGoalEditor, openAssign, goalPlantings } from "./goals.js";
 import { openBonitur } from "./bonitur.js";
 import { mixLegend } from "./mix.js";
 
@@ -210,7 +210,7 @@ export function openCropOverview(crop0) {
         sorten,
         saetze,
         goals.length ? block("Ernteziele", h("ul", { class: "calc" }, goals.map((g) => h("li", {},
-          link(`${fmtNum(g.amount)} ${g.unit} je Woche${g.variety ? ` (${g.variety})` : ""}`, () => openGoalEditor(g)),
+          link(`${fmtNum(g.amount)} ${g.unit} je Woche${g.variety ? ` (${g.variety})` : ""}`, () => openGoalOverview(g)),
           h("span", { class: "muted" }, ` · KW ${isoWeek(dayNum(g.start_date))} bis ${isoWeek(dayNum(g.end_date))}`))))) : null,
         wishes.length ? block("Für Freunde", h("ul", { class: "calc" }, wishes.map((x) => h("li", {},
           h("strong", {}, x.count), ` ${x.variety || "(Sorte offen)"} für ${find.person(x.person_id)?.name || "?"}`,
@@ -323,7 +323,7 @@ export function openPlantingOverview(p0) {
           names.map((n) => varietyOf(p.crop_id, n)).filter(Boolean).map((v) => varietyCard(v, crop))) : null,
         isMixed(p) ? block("Sorten im Beet", mixLegend(p, crop, bed)) : null,
         goal ? h("p", { class: "small", style: { margin: 0 } }, "Gehört zum Ernteziel ",
-          link(`${fmtNum(goal.amount)} ${goal.unit} je Woche`, () => openGoalEditor(goal)),
+          link(`${fmtNum(goal.amount)} ${goal.unit} je Woche`, () => openGoalOverview(goal)),
           ". Ändert sich das Ziel, passt sich der Satz an, solange er nicht gesät ist.") : null,
         p.notes ? block("Notizen", h("p", { class: "var-notes" }, p.notes)) : null,
       ];
@@ -343,6 +343,92 @@ export function openPlantingOverview(p0) {
           if (item) openPlantingOverview(item);
         } }, icon("copy"), "Folgesatz"),
         crop?.trait_group ? h("button", { type: "button", class: "btn", onclick: () => { closeAll(); openBonitur(p0.id); } }, "Bonitieren") : null,
+        h("span", { class: "spacer" }),
+        h("button", { type: "button", class: "btn btn-quiet", onclick: () => ui.dlg.close() }, "Schließen"),
+        h("button", { type: "submit", class: "btn btn-primary" }, icon("edit"), "Bearbeiten")];
+    },
+  });
+}
+
+// ---------------------------------------------------------------- Ernteziel mit seinen Folgesätzen
+
+const DONE = [["harvest_done", "abgeerntet"], ["planted_done", "gepflanzt"], ["sown_done", "gesät"]];
+
+function seriesAxis(range) {
+  return h("div", { class: "series-axis" }, monthStarts(range.ys, range.len).map(({ day, month }) =>
+    h("span", { style: { left: `${((day - range.ys) / range.len) * 100}%` } }, MONTHS_SHORT[month])));
+}
+
+export function openGoalOverview(g0) {
+  liveDialog({
+    get: () => (state.goals || []).find((g) => g.id === g0.id),
+    title: (g) => `${find.crop(g.crop_id)?.name ?? "Kultur"}${g.variety ? ` ${g.variety}` : ""}`,
+    extraHead: () => h("span", { class: "var-head-crop" }, "Ernteziel"),
+    onEdit: (g) => openGoalEditor(g),
+    cls: "goal-ov",
+    render: (g) => {
+      const crop = find.crop(g.crop_id);
+      const ps = goalPlantings(g);
+      const items = ps.map((p) => ({ p, ph: phases(p), bed: find.bed(p.bed_id) }));
+      const count = ({ p, bed }) => (isMixed(p) ? mixPlan(p, crop, bed).total : plantCount(p, crop, bed));
+      const loose = ps.filter((p) => !p.bed_id).length;
+      const sown = ps.filter((p) => p.sown_done).length;
+      const next = items.find(({ p, ph }) => !p.sown_done && ph.sow >= state.day);
+      const interval = g.interval_days || (items.length > 1 ? items[1].ph.hs - items[0].ph.hs : null);
+      const gs = dayNum(g.start_date), ge = dayNum(g.end_date);
+      let rows = null;
+      if (items.length) {
+        // gemeinsamer Maßstab für alle Sätze, auf ganze Monate gerundet
+        const from = Math.min(...items.map((x) => x.ph.sow)), to = Math.max(...items.map((x) => x.ph.he));
+        const a = dayNum(`${isoOf(from).slice(0, 7)}-01`);
+        const range = { ys: a, len: monthStarts(to + 1, 32)[0].day - a };
+        rows = h("div", { class: "ov-rows series-rows" },
+          h("div", { class: "ov-row ov-axis", "aria-hidden": "true" }, h("span", { class: "muted small" }, "Satz"), seriesAxis(range)),
+          items.map((it, i) => {
+            const { p, ph, bed } = it;
+            const done = DONE.find(([k]) => p[k]);
+            return h("button", { type: "button", class: "ov-row", onclick: () => openPlantingOverview(p) },
+              h("span", { class: "ov-row-main" }, h("strong", {}, `Satz ${i + 1}`),
+                h("span", { class: "muted" }, ` · ${bed ? bed.name : "ohne Beet"}`),
+                done ? h("span", { class: "src src-bonitur" }, done[1]) : null,
+                issuesOf(p.id).length ? h("span", { class: "flag-dot", title: issuesOf(p.id).map((x) => x.text).join("\n") }, "!") : null),
+              h("span", { class: "ov-row-sub muted" },
+                `${ph.plant != null ? `Aussaat ${fmtDay(ph.sow)}, pflanzen ${fmtDay(ph.plant)}` : `Aussaat ${fmtDay(ph.sow)}`}`
+                + ` · Ernte ${fmtDay(ph.hs)} bis ${fmtDay(ph.he)} · ${plural(count(it), "Pflanze", "Pflanzen")}`),
+              miniTimeline(p, null, range));
+          }));
+      }
+      return [
+        facts([
+          ["Kultur", cropLink(crop)],
+          ["Sorte", g.variety ? varietyLink(g.crop_id, g.variety) : null],
+          ["Ziel", `${fmtNum(g.amount)} ${g.unit} je Woche`],
+          ["Erntezeit", `${fmtDay(gs)} bis ${fmtDay(ge, { year: true })} (KW ${isoWeek(gs)} bis ${isoWeek(ge)})`],
+          ["Sätze", items.length ? `${items.length}${interval ? `, alle ${plural(interval, "Tag", "Tage")}` : ""}` : "keine"],
+          ["Pflanzen", items.length ? `${items.reduce((n, it) => n + count(it), 0)} zusammen` : null],
+          ["Stand", items.length ? `${sown} von ${items.length} gesät${next ? ` · nächste Aussaat ${fmtDay(next.ph.sow, { year: yearOf(next.ph.sow) !== yearOf(state.day) })}` : ""}` : null],
+        ]),
+        loose ? h("p", { class: "small", style: { margin: 0 } },
+          `${plural(loose, "Satz hat", "Sätze haben")} noch kein Beet. `, link("Beete vorschlagen", () => openAssign(g))) : null,
+        rows ? block(blockHead("Sätze"), rows) : h("p", { class: "muted" }, "Zu diesem Ziel gibt es keine Sätze mehr."),
+        g.notes ? block("Notizen", h("p", { class: "var-notes" }, g.notes)) : null,
+      ];
+    },
+    foot: (ui) => {
+      // Nur in der Zeitleiste: Satzfolge auf- oder zuklappen
+      const toggle = h("button", { type: "button", class: "btn" });
+      const paintToggle = () => {
+        toggle.textContent = state.seriesOpen.has(g0.id) ? "Als Satzfolge zeigen" : "Sätze einzeln zeigen";
+        toggle.title = state.seriesOpen.has(g0.id) ? "In der Zeitleiste wieder als eine Zeile zusammenfassen" : "In der Zeitleiste jeden Satz als eigenen Balken zeigen";
+      };
+      toggle.onclick = () => {
+        if (state.seriesOpen.has(g0.id)) state.seriesOpen.delete(g0.id); else state.seriesOpen.add(g0.id);
+        paintToggle();
+        emit("view");
+      };
+      paintToggle();
+      return [
+        location.hash.replace("#", "") === "zeitleiste" ? toggle : null,
         h("span", { class: "spacer" }),
         h("button", { type: "button", class: "btn btn-quiet", onclick: () => ui.dlg.close() }, "Schließen"),
         h("button", { type: "submit", class: "btn btn-primary" }, icon("edit"), "Bearbeiten")];
