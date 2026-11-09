@@ -140,9 +140,14 @@ def duration_model(seasonal: bool = True) -> tuple[Callable[[date, int, bool], O
 
 # ---------------------------------------------------------------- Rechnen
 
-def _layout(count: int, crop: dict) -> dict:
-    """Fläche ohne Beet für genau so viele Pflanzen: Reihen quer, Länge entlang (aufgerundet auf volle Reihen)."""
+def _layout(count: int, crop: dict, bed_width: Optional[float] = None) -> dict:
+    """Fläche ohne Beet für genau so viele Pflanzen: Reihen quer, Länge entlang (aufgerundet auf volle Reihen).
+    Sind alle Beete gleich breit, ist der Satz ein Streifen über die ganze Beetbreite."""
     rs, ps = crop["row_spacing"] or 30, crop["plant_spacing"] or 30
+    if bed_width:
+        rows = max(1, int((bed_width * 100 + 0.5) // rs))
+        per_row = math.ceil(count / rows)
+        return {"rows": rows, "len": round(per_row * ps / 100, 2), "span": round(bed_width, 2), "count": rows * per_row}
     max_rows = max(1, int((100 + 0.5) // rs))  # wie viele Reihen auf 1 m Breite passen
     for rows in range(max_rows, 0, -1):
         per_row = math.ceil(count / rows)
@@ -154,7 +159,8 @@ def _layout(count: int, crop: dict) -> dict:
     return {"rows": 1, "len": round(per_row * ps / 100, 2), "span": round(rs / 100, 2), "count": per_row}
 
 
-def successions(goal: dict, crop: dict, fd: Callable[[date, int, bool], Optional[int]]) -> list[dict]:
+def successions(goal: dict, crop: dict, fd: Callable[[date, int, bool], Optional[int]],
+                bed_width: Optional[float] = None) -> list[dict]:
     """Die Sätze, die das Ziel braucht."""
     start, end = date.fromisoformat(goal["start_date"]), date.fromisoformat(goal["end_date"])
     window = goal.get("window_days") or crop["harvest_days"] or 14
@@ -162,7 +168,7 @@ def successions(goal: dict, crop: dict, fd: Callable[[date, int, bool], Optional
     transplant = crop["method"] == "transplant"
     per_interval = goal["amount"] * interval / 7  # was ein Satz liefern muss
     count = max(1, math.ceil(per_interval / (goal["yield_per_plant"] or 1)))
-    layout = _layout(count, crop)
+    layout = _layout(count, crop, bed_width)
     out = []
     n = max(1, math.ceil(((end - start).days + 1) / interval))
     for i in range(n):
@@ -200,7 +206,7 @@ def _started(conn, p: dict) -> bool:
 def apply(conn, goal: dict, fd) -> dict:
     """Sätze des Ziels anlegen bzw. anpassen. Begonnene Sätze (gesät, gepflanzt, bonitiert) bleiben, wie sie sind."""
     crop = dict(conn.execute("SELECT * FROM crops WHERE id = ?", (goal["crop_id"],)).fetchone())
-    wanted = successions(goal, crop, fd)
+    wanted = successions(goal, crop, fd, db.uniform_width(conn))
     existing = {p["goal_seq"]: p for p in db.rows(conn, "SELECT * FROM plantings WHERE goal_id = ?", (goal["id"],))}
     created, updated, kept, removed = [], [], [], []
     for s in wanted:
@@ -309,7 +315,7 @@ def _record(conn, base: dict, body: GoalIn) -> dict:
 
 def _plan_out(conn, g: dict, fd, basis: str) -> dict:
     crop = dict(conn.execute("SELECT * FROM crops WHERE id = ?", (g["crop_id"],)).fetchone())
-    items = successions(g, crop, fd)
+    items = successions(g, crop, fd, db.uniform_width(conn))
     window = g.get("window_days") or crop["harvest_days"] or 14
     return {"successions": items, "basis": basis, "window_days": window, "interval_days": g.get("interval_days") or window,
             "method": crop["method"], "plants": sum(s["count"] for s in items if not s["too_cold"])}

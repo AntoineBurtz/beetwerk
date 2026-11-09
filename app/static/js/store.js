@@ -1,5 +1,5 @@
 // Zentraler Zustand: Daten vom Server, Stichtag, Auswahl. Änderungen laufen optimistisch.
-import { analyse, todayNum } from "./util.js";
+import { analyse, todayNum, rules } from "./util.js";
 import { toast } from "./ui.js";
 
 async function request(method, url, body) {
@@ -48,6 +48,7 @@ export const state = {
   handovers: [], // ihre Wünsche
   goals: [], // Ernteziele für Folgesätze
   seriesOpen: new Set(), // Ernteziele, deren Sätze die Zeitleiste einzeln statt als Satzfolge zeigt
+  marked: new Set(), // mehrere markierte Sätze (IDs) zum gemeinsamen Ändern oder Löschen
   day: initialDay(),
   sel: null, // { type: "bed" | "planting", id }
   // Modus der Karte: Kultur setzen, Satz ohne Beet zuweisen oder neue Fläche aufziehen
@@ -65,7 +66,11 @@ export function subscribe(fn) {
 }
 
 export function emit(reason = "data") {
-  if (reason === "data") issues = analyse(state);
+  if (reason === "data") {
+    rules.uniformBeds = state.settings?.bed_mode === "uniform";
+    for (const id of state.marked) if (!state.plantings.some((p) => p.id === id)) state.marked.delete(id);
+    issues = analyse(state);
+  }
   for (const fn of listeners) fn(reason);
 }
 
@@ -114,6 +119,56 @@ export function select(sel) {
 export function setMode(mode) {
   state.mode = mode;
   emit("select");
+}
+
+// Mehrfachauswahl von Sätzen: on = true/false setzt, sonst umschalten
+export function mark(ids, on = null) {
+  const list = [...ids];
+  const turnOn = on ?? !list.every((id) => state.marked.has(id));
+  for (const id of list) {
+    if (turnOn) state.marked.add(id); else state.marked.delete(id);
+  }
+  emit("select");
+}
+
+export function clearMarks() {
+  if (!state.marked.size) return;
+  state.marked.clear();
+  emit("select");
+}
+
+// Mehrere Einträge nacheinander ändern; ein Schritt zum Rückgängigmachen
+export async function patchMany(kind, list, { undoLabel } = {}) {
+  const done = [];
+  for (const { id, changes } of list) {
+    const item = state[LIST[kind]].find((x) => x.id === id);
+    if (!item) continue;
+    // changes darf eine Funktion sein: sie sieht dann schon die vorher geänderten Einträge
+    const ch = typeof changes === "function" ? changes(item) : changes;
+    if (!ch || !Object.keys(ch).length) continue;
+    const before = {};
+    for (const k of Object.keys(ch)) before[k] = item[k];
+    try {
+      await patch(kind, id, ch);
+      done.push({ type: "patch", kind, id, before });
+    } catch { break; }
+  }
+  if (undoLabel && done.length) pushUndo({ type: "group", entries: done, label: undoLabel });
+  return done.length;
+}
+
+export async function removeMany(kind, ids, { undoLabel } = {}) {
+  const done = [];
+  for (const id of ids) {
+    const item = state[LIST[kind]].find((x) => x.id === id);
+    if (!item) continue;
+    try {
+      await remove(kind, id);
+      done.push({ type: "delete", kind, item, orphans: [] });
+    } catch { break; }
+  }
+  if (undoLabel && done.length) pushUndo({ type: "group", entries: done, label: undoLabel });
+  return done.length;
 }
 
 export async function create(kind, data, { undoLabel } = {}) {
@@ -188,22 +243,28 @@ function pushUndo(entry) {
   toast(entry.label, { action: "Rückgängig", onAction: undo });
 }
 
+async function undoEntry(entry) {
+  if (entry.type === "group") {
+    for (const e of [...entry.entries].reverse()) await undoEntry(e);
+  } else if (entry.type === "patch") {
+    await patch(entry.kind, entry.id, entry.before);
+  } else if (entry.type === "create") {
+    await remove(entry.kind, entry.id);
+  } else if (entry.type === "delete") {
+    const { id, ...rest } = entry.item;
+    const restored = await create(entry.kind, rest);
+    if (entry.kind === "beds") {
+      // Sätze, die vorher in diesem Beet standen, wieder zuordnen
+      for (const p of entry.orphans || []) await patch("plantings", p, { bed_id: restored.id });
+    }
+  }
+}
+
 export async function undo() {
   const entry = undoStack.pop();
   if (!entry) return;
   try {
-    if (entry.type === "patch") {
-      await patch(entry.kind, entry.id, entry.before);
-    } else if (entry.type === "create") {
-      await remove(entry.kind, entry.id);
-    } else if (entry.type === "delete") {
-      const { id, ...rest } = entry.item;
-      const restored = await create(entry.kind, rest);
-      if (entry.kind === "beds") {
-        // Sätze, die vorher in diesem Beet standen, wieder zuordnen
-        for (const p of entry.orphans || []) await patch("plantings", p, { bed_id: restored.id });
-      }
-    }
+    await undoEntry(entry);
     toast("Rückgängig gemacht");
   } catch { /* Meldung kam schon */ }
 }

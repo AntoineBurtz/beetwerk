@@ -188,6 +188,8 @@ class SettingsIn(BaseModel):
     weather_frost: Optional[Literal["-2", "0", "2"]] = None
     weather_lat: Optional[float] = Field(None, ge=-90, le=90)
     weather_lon: Optional[float] = Field(None, ge=-180, le=180)
+    bed_mode: Optional[Literal["uniform", "individual"]] = None
+    bed_width: Optional[float] = Field(None, ge=0.2, le=10)
 
 
 class CustomSource(BaseModel):
@@ -373,6 +375,9 @@ def create_bed(body: BedIn):
     with db.session() as conn:
         if "sort" not in body.model_fields_set:
             record["sort"] = conn.execute("SELECT COALESCE(MAX(sort), -1) + 1 FROM beds").fetchone()[0]
+        width = db.uniform_width(conn)
+        if width and record["kind"] == "bed":
+            record.update(_fit_geometry(record, width)[0])
         new_id = _insert(conn, "beds", record)
         return _get(conn, "beds", new_id)
 
@@ -383,7 +388,53 @@ def update_bed(bed_id: int, body: BedIn):
     with db.session() as conn:
         _get(conn, "beds", bed_id)
         _update(conn, "beds", bed_id, changes)
-        return _get(conn, "beds", bed_id)
+        bed = _get(conn, "beds", bed_id)
+        width = db.uniform_width(conn)
+        if width and bed["kind"] == "bed":
+            bed = _fit_bed(conn, bed, width)
+        return bed
+
+
+# ---------------------------------------------------------------- Einheitliche Beetbreite
+
+def _fit_geometry(b: dict, width: float) -> tuple[dict, bool]:
+    """Lage eines Beets mit Einheitsbreite: die lange Seite wird zur Länge (sonst um 90° gedreht), die Mitte bleibt."""
+    length, w0, rot = b["length"], b["width"], b.get("rotation") or 0.0
+    cx, cy = b["x"] + length / 2, b["y"] + w0 / 2
+    turned = length < w0 and w0 > width + 1e-9
+    if turned:
+        length, rot = w0, (rot + 90) % 360
+    return {"length": round(length, 2), "width": round(width, 2), "rotation": round(rot, 2),
+            "x": round(cx - length / 2, 2), "y": round(cy - width / 2, 2)}, turned
+
+
+def _fit_bed(conn, bed: dict, width: float) -> dict:
+    """Beet auf die Einheitsbreite bringen. Sätze darin ziehen mit: beim Drehen wird quer zu längs."""
+    new, turned = _fit_geometry(bed, width)
+    if all(abs((bed[k] or 0) - v) < 1e-6 for k, v in new.items()):
+        return bed
+    length0, width0 = bed["length"], bed["width"]
+    for p in db.rows(conn, "SELECT id, start, len, offset, span FROM plantings WHERE bed_id = ?", (bed["id"],)):
+        start, ln, off = p["start"] or 0.0, p["len"], p["offset"] or 0.0
+        full = p["span"] is None and off == 0
+        span = p["span"] if p["span"] is not None else max(0.05, width0 - off)
+        if turned:
+            start, ln, off, span = off, span, max(0.0, length0 - start - ln), ln
+            full = False
+        span = min(span, width)
+        off = min(max(off, 0.0), max(0.0, width - span))
+        full = full or span >= width - 0.001
+        _update(conn, "plantings", p["id"], {"start": round(start, 2), "len": round(ln, 2),
+                                             "offset": 0.0 if full else round(off, 2), "span": None if full else round(span, 2)})
+    _update(conn, "beds", bed["id"], new)
+    return _get(conn, "beds", bed["id"])
+
+
+def _fit_all_beds(conn) -> None:
+    width = db.uniform_width(conn)
+    if width:
+        for bed in db.rows(conn, "SELECT * FROM beds WHERE kind = 'bed'"):
+            _fit_bed(conn, bed, width)
 
 
 @app.delete("/api/beds/{bed_id}", status_code=204)
@@ -510,9 +561,12 @@ def delete_planting(planting_id: int):
 
 @app.patch("/api/settings")
 def update_settings(body: SettingsIn):
+    changes = body.model_dump(exclude_unset=True, exclude_none=True)
     with db.session() as conn:
-        for key, value in body.model_dump(exclude_unset=True, exclude_none=True).items():
+        for key, value in changes.items():
             _set(conn, key, str(value))
+        if "bed_mode" in changes or "bed_width" in changes:
+            _fit_all_beds(conn)  # alle Beete auf die gleiche Breite, die Oberfläche lädt danach neu
         return {k: v for k, v in _settings(conn).items() if k not in INTERNAL_SETTINGS}
 
 
@@ -616,6 +670,7 @@ def load_demo(replace: bool = False):
             _set(conn, "garden_width", "16")
             _set(conn, "garden_height", "11")
         seed_demo(conn)
+        _fit_all_beds(conn)
     return all_data()
 
 

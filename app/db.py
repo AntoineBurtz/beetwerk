@@ -7,6 +7,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Optional
 
 DATA_DIR = Path(os.environ.get("BEETWERK_DATA", Path(__file__).resolve().parent.parent / "data"))
 DB_PATH = DATA_DIR / "beetwerk.db"
@@ -188,7 +189,21 @@ DEFAULT_SETTINGS = {
     "garden_width": "16",
     "garden_height": "11",
     "rotation_years": "3",
+    "bed_mode": "individual",  # "uniform": alle Beete gleich breit, Reihen entlang der langen Seite
+    "bed_width": "1.2",
 }
+
+
+def uniform_width(conn) -> Optional[float]:
+    """Einheitliche Beetbreite in Metern, wenn alle Beete gleich breit sind, sonst None."""
+    s = {r[0]: r[1] for r in conn.execute("SELECT key, value FROM settings WHERE key IN ('bed_mode', 'bed_width')")}
+    if s.get("bed_mode") != "uniform":
+        return None
+    try:
+        w = float(s.get("bed_width") or 1.2)
+    except ValueError:
+        return None
+    return w if w > 0 else None
 
 
 def connect() -> sqlite3.Connection:

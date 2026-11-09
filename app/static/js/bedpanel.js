@@ -13,7 +13,7 @@ export function bedSummary(bed, { actions = [], onClose } = {}) {
       onClose ? h("button", { type: "button", class: "icon-btn", "aria-label": "Schließen", title: "Schließen", onclick: onClose },
         icon("close")) : null),
     h("p", { class: "muted", style: { margin: 0 } },
-      `${KIND_LABEL[bed.kind]} · ${fmtNum(bed.length)} × ${fmtNum(bed.width)} m · ${fmtNum(bed.length * bed.width)} m²`),
+      `${KIND_LABEL[bed.kind]} · ${fmtNum(bed.length, 2)} × ${fmtNum(bed.width, 2)} m · ${fmtNum(bed.length * bed.width)} m²`),
     bed.notes ? h("p", { class: "small", style: { margin: 0, whiteSpace: "pre-wrap" } }, bed.notes) : null,
     actions.length ? h("div", { class: "actions" }, actions) : null);
 }

@@ -193,17 +193,17 @@ def clear_tables(conn) -> None:
 
 # ---------------------------------------------------------------- Rechnen
 
-def plant_count(p: dict, crop: dict, bed: Optional[dict]) -> int:
+def plant_count(p: dict, crop: dict, bed: Optional[dict], uniform: bool = False) -> int:
     from .baserow import plant_count as count  # gleiche Rechnung wie die Oberfläche
-    return count(p, crop, bed)
+    return count(p, crop, bed, uniform)
 
 
-def _parts(p: dict, crop: dict, bed: Optional[dict]) -> list[tuple[str, int]]:
+def _parts(p: dict, crop: dict, bed: Optional[dict], uniform: bool = False) -> list[tuple[str, int]]:
     """Sorten eines Satzes mit Pflanzenzahl."""
     mixed = bonitur._loads(p.get("varieties"), []) or []
     if mixed:
         return [(str(v.get("name") or ""), int(v.get("count") or 0)) for v in mixed]
-    return [(p["variety"] or "", plant_count(p, crop, bed))]
+    return [(p["variety"] or "", plant_count(p, crop, bed, uniform))]
 
 
 def _ok_share(germination: float, k: int) -> float:
@@ -250,6 +250,7 @@ def plan(conn, year: Optional[int] = None) -> dict:
     people = {p["id"]: p for p in db.rows(conn, "SELECT * FROM people ORDER BY name COLLATE NOCASE")}
     handovers = db.rows(conn, "SELECT * FROM handovers ORDER BY pickup_date, id")
     states = {s["key"]: s for s in db.rows(conn, "SELECT * FROM nursery")}
+    uniform = db.uniform_width(conn) is not None
 
     batches: dict[str, dict] = {}
 
@@ -267,7 +268,7 @@ def plan(conn, year: Optional[int] = None) -> dict:
         if crop is None:
             continue
         bed = beds.get(p["bed_id"])
-        for variety, count in _parts(p, crop, bed):
+        for variety, count in _parts(p, crop, bed, uniform):
             if count <= 0:
                 continue
             b = batch(crop, variety, p["sow_date"])

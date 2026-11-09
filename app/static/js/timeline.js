@@ -1,6 +1,6 @@
 // Zeitleiste: jede Zeile ein Beet, jeder Balken ein Satz mit Anzucht, Kultur und Ernte.
 // Sätze eines Ernteziels stehen als eine Satzfolge in einer Spur. Erster Klick markiert, zweiter öffnet die Übersicht.
-import { state, find, select, patch, remove, setDay, issuesOf } from "./store.js";
+import { state, find, select, patch, remove, setDay, issuesOf, mark, patchMany } from "./store.js";
 import {
   h, phases, mix, textOn, clamp, fmtDay, fmtNum, isoOf, yearOf, yearStart, isoWeek, plural,
   MONTHS, MONTHS_SHORT, PLANTABLE, KIND_LABEL, spanOf, todayNum, dayNum, isMixed, varietyText, monthStarts,
@@ -9,6 +9,7 @@ import { openPlantingEditor, openBedEditor, firstFreeStart, openSettings } from 
 import { iconBtn, icon, confirmDialog, replaceKeepingFocus } from "./ui.js";
 import { bedSummary, bedUsage } from "./bedpanel.js";
 import { openPlantingOverview, openGoalOverview, plantingStatus } from "./overview.js";
+import { bulkBar, markedPlantings } from "./bulk.js";
 import { weatherSpan, weatherBand, weatherEnabled, frostFor, frostSpan, frostOverlay, WX_H } from "./weather.js";
 
 const ZOOMS = [1.3, 2, 3, 4.6, 7, 11];
@@ -85,24 +86,52 @@ export function mountTimeline(root) {
   const el = h("div", { class: "tlview" }, toolbar, h("div", { class: "tl-main" }, scroll, side, selbar));
   root.append(el);
 
-  // Markierung: ein Satz (state.sel, wie auf der Karte) oder eine Satzfolge (nur hier, als Ernteziel-ID)
+  // Markierung: ein Satz (state.sel, wie auf der Karte), eine Satzfolge (nur hier, als Ernteziel-ID)
+  // oder mehrere Sätze (state.marked, mit Strg/Umschalt oder nach „Mehrere“) zum gemeinsamen Ändern
   let seriesSel = null;
+  let multiMode = false; // nach „Mehrere“: jeder Klick schaltet einen Satz dazu oder weg
   const goalOf = (id) => (state.goals || []).find((g) => g.id === id);
-  const isMarked = (p) => state.sel?.type === "planting" && state.sel.id === p.id;
+  const isMarked = (p) => (state.sel?.type === "planting" && state.sel.id === p.id) || state.marked.has(p.id);
 
   function markSeries(id) {
     seriesSel = id;
+    state.marked.clear();
     if (state.sel) select(null); else { render(); renderSel(); }
   }
 
   function clearMarks() {
-    const had = seriesSel != null;
+    const had = seriesSel != null || state.marked.size > 0;
     seriesSel = null;
+    multiMode = false;
+    state.marked.clear();
     if (state.sel) select(null); else if (had) { render(); renderSel(); }
+  }
+
+  // Sätze zur Mehrfachauswahl dazu oder weg; die bisherige Einzelmarkierung kommt mit hinein
+  function toggleMulti(ids) {
+    if (!state.marked.size) {
+      if (state.sel?.type === "planting") state.marked.add(state.sel.id);
+      if (seriesSel != null) {
+        for (const el of scroll.querySelectorAll(`.bar.series[data-goal="${seriesSel}"]`)) {
+          for (const id of el.dataset.members.split(",")) state.marked.add(Number(id));
+        }
+      }
+    }
+    seriesSel = null;
+    if (state.sel?.type === "planting") state.sel = null;
+    mark(ids);
+    if (!state.marked.size) multiMode = false;
   }
 
   // Leiste unten: was markiert ist, mit „Details“ – auf dem Handy der zweite Weg zur Übersicht
   function renderSel() {
+    if (state.marked.size) {
+      selbar.hidden = false;
+      selbar.classList.add("multi");
+      selbar.replaceChildren(...bulkBar(markedPlantings()));
+      return;
+    }
+    selbar.classList.remove("multi");
     const p = state.sel?.type === "planting" ? find.planting(state.sel.id) : null;
     const goal = !p && seriesSel != null ? goalOf(seriesSel) : null;
     if (!goal) seriesSel = null;
@@ -122,12 +151,14 @@ export function mountTimeline(root) {
         h("span", { class: "muted small" }, sub)),
       grouped ? h("button", { type: "button", class: "btn btn-sm btn-quiet", title: "Die Sätze dieses Ernteziels wieder in einer Zeile zeigen",
         onclick: () => { state.seriesOpen.delete(p.goal_id); render(); renderSel(); } }, "Zusammenfassen") : null,
+      h("button", { type: "button", class: "btn btn-sm btn-quiet", title: "Weitere Sätze dazu markieren, um sie gemeinsam zu ändern oder zu löschen (am Rechner auch mit Strg- oder Umschalt-Klick)",
+        onclick: () => { multiMode = true; toggleMulti([]); } }, "Mehrere"),
       h("button", { type: "button", class: "btn btn-sm btn-primary", onclick: () => (p ? openPlantingOverview(p) : openGoalOverview(goal)) }, "Details"),
       iconBtn("close", "Markierung aufheben", clearMarks)].filter(Boolean));
   }
 
   function onKey(e) {
-    if (e.key !== "Escape" || seriesSel == null || state.sel || document.querySelector("dialog[open]")) return;
+    if (e.key !== "Escape" || (seriesSel == null && !state.marked.size) || state.sel || document.querySelector("dialog[open]")) return;
     const tag = e.target.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
     clearMarks();
@@ -321,7 +352,7 @@ export function mountTimeline(root) {
     track.addEventListener("click", (e) => {
       if (e.target !== track) return;
       // Ist etwas markiert, hebt ein Klick daneben nur die Markierung auf
-      if (state.sel?.type === "planting" || seriesSel != null) { clearMarks(); return; }
+      if (state.sel?.type === "planting" || seriesSel != null || state.marked.size) { clearMarks(); return; }
       const day = geo.ys + Math.floor((e.clientX - track.getBoundingClientRect().left) / geo.ppd);
       openPlantingEditor(null, { bed_id: bed?.id ?? null, anchor: day });
     });
@@ -333,7 +364,7 @@ export function mountTimeline(root) {
           onclick: () => select(selected ? null : { type: "bed", id: bed.id }) }, labelText)
         : h("span", { class: "muted" }, labelText),
       bed ? h("span", { class: "muted small", style: { display: "block", fontWeight: 400 } },
-        `${bed.kind !== "bed" ? KIND_LABEL[bed.kind] + ", " : ""}${fmtNum(bed.length)} × ${fmtNum(bed.width)} m`) : null);
+        `${bed.kind !== "bed" ? KIND_LABEL[bed.kind] + ", " : ""}${fmtNum(bed.length, 2)} × ${fmtNum(bed.width, 2)} m`) : null);
     return h("div", { class: `tl-row${selected ? " selected" : ""}`, "data-bed": bed ? bed.id : "" }, label, track);
   }
 
@@ -387,13 +418,15 @@ export function mountTimeline(root) {
     const issues = members.flatMap((m) => issuesOf(m.p.id));
     const conflict = issues.some((i) => i.kind === "conflict");
     const field0 = Math.min(...members.map((m) => m.ph.fieldStart));
-    const selected = seriesSel === goal.id;
+    const allMarked = members.every((m) => state.marked.has(m.p.id));
+    const selected = seriesSel === goal.id || allMarked;
     const inside = !selected && members.some((m) => isMarked(m.p));
     const el = h("div", {
       class: `bar series${conflict ? " conflict" : ""}${selected ? " selected" : ""}${inside ? " has-selected" : ""}`
         + `${left < 0 ? " clip-l" : ""}${left + width > geo.len * ppd ? " clip-r" : ""}`,
       style: { left: `${left}px`, width: `${Math.max(width, 3)}px`, top: `${ROW_PAD + lane * LANE_H}px` },
       "data-goal": goal.id,
+      "data-members": members.map((m) => m.p.id).join(","),
       title: seriesTip(goal, members, crop, issues) + (selected ? "\n\nNochmal klicken für das Ernteziel" : "\n\nKlicken markiert, zweiter Klick zeigt das Ernteziel"),
     });
     if (field0 > span.sow) el.append(h("div", { class: "sr sr-nursery", style: { left: 0, width: `${x(field0)}px`, background: mix(color, "#ffffff", 0.2) } }));
@@ -415,7 +448,9 @@ export function mountTimeline(root) {
     if (issues.length) el.append(h("span", { class: `flag ${conflict ? "conflict" : "rotation"}`, style: { right: "3px", top: "3.5px" } }, "!"));
     el.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (seriesSel === goal.id) openGoalOverview(goal);
+      // Mehrfachauswahl: alle Sätze dieser Satzfolge dazu oder weg
+      if (e.ctrlKey || e.metaKey || e.shiftKey || multiMode) toggleMulti(members.map((m) => m.p.id));
+      else if (seriesSel === goal.id) openGoalOverview(goal);
       else markSeries(goal.id);
     });
     return el;
@@ -453,7 +488,13 @@ export function mountTimeline(root) {
     e.stopPropagation();
     const edge = e.target.dataset?.edge || null;
     drag = { p, el, edge, x0: e.clientX, y0: e.clientY, moved: false, touch: e.pointerType === "touch",
-      left0: parseFloat(el.style.left), width0: parseFloat(el.style.width), dd: 0, targetRow: null };
+      left0: parseFloat(el.style.left), width0: parseFloat(el.style.width), dd: 0, targetRow: null,
+      multi: e.ctrlKey || e.metaKey || e.shiftKey, group: null };
+    // Einen von mehreren markierten Sätzen ziehen: alle wandern gemeinsam in der Zeit
+    if (!edge && state.marked.size > 1 && state.marked.has(p.id)) {
+      drag.group = [...scroll.querySelectorAll(".bar[data-pid]")].filter((b) => state.marked.has(Number(b.dataset.pid)))
+        .map((b) => ({ el: b, left0: parseFloat(b.style.left) }));
+    }
     if (!drag.touch) {
       el.setPointerCapture(e.pointerId);
       e.preventDefault();
@@ -474,6 +515,15 @@ export function mountTimeline(root) {
     }
     const ph = phases(drag.p);
     let dd = Math.round(dx / geo.ppd);
+    if (drag.group) {
+      for (const g of drag.group) {
+        g.el.style.left = `${g.left0 + dd * geo.ppd}px`;
+        g.el.classList.add("dragging");
+      }
+      drag.dd = dd;
+      drag.el.title = `${plural(state.marked.size, "Satz", "Sätze")} um ${plural(Math.abs(dd), "Tag", "Tage")} ${dd < 0 ? "früher" : "später"}`;
+      return;
+    }
     if (drag.edge === "r") {
       dd = Math.max(dd, ph.hs - ph.he);
       drag.el.style.width = `${Math.max(3, drag.width0 + dd * geo.ppd)}px`;
@@ -509,9 +559,21 @@ export function mountTimeline(root) {
     d.el.removeEventListener("pointermove", onBarMove);
     d.targetRow?.classList.remove("drop-target");
     if (!d.moved) {
+      if (d.multi || multiMode) { toggleMulti([d.p.id]); return; }
+      if (state.marked.size) { state.marked.clear(); seriesSel = null; select({ type: "planting", id: d.p.id }); return; }
       // Erster Klick markiert, zweiter auf denselben Satz öffnet die Übersicht
       if (isMarked(d.p)) openPlantingOverview(find.planting(d.p.id));
       else { seriesSel = null; select({ type: "planting", id: d.p.id }); }
+      return;
+    }
+    if (d.group) {
+      const n = d.dd;
+      if (!n) { render(); return; }
+      const shift = (iso) => (iso ? isoOf(dayNum(iso) + n) : iso);
+      const ids = [...state.marked];
+      await patchMany("plantings", ids.map((id) => ({ id, changes: (q) => ({
+        sow_date: shift(q.sow_date), plant_date: shift(q.plant_date), harvest_start: shift(q.harvest_start), harvest_end: shift(q.harvest_end),
+      }) })), { undoLabel: `${plural(ids.length, "Satz", "Sätze")} um ${plural(Math.abs(n), "Tag", "Tage")} ${n < 0 ? "früher" : "später"}` });
       return;
     }
     const p = d.p;

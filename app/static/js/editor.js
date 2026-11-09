@@ -1,5 +1,5 @@
 // Dialoge zum Bearbeiten von Sätzen, Beeten, Kulturen und Einstellungen.
-import { state, find, create, patch, remove, issuesOf, api, replaceAll, select, emit, setMode, setDay } from "./store.js";
+import { state, find, create, patch, remove, issuesOf, api, replaceAll, select, emit, setMode, setDay, load } from "./store.js";
 import {
   h, dayNum, isoOf, datesFromCrop, rowCount, plantCount, spanOf, fmtNum, KIND_LABEL, PLANTABLE,
   phases, rectOf, round2, clamp, plural, fmtDay, isMixed, varietyText,
@@ -49,6 +49,57 @@ export function shell(title, { onSubmit, extraHead } = {}) {
 
 export function field(label, input, hint) {
   return h("label", { class: "field" }, h("span", {}, label), input, hint ? h("span", { class: "hint" }, hint) : null);
+}
+
+// Einheitliche Beetbreite in Metern, wenn alle Beete gleich breit sind und es um ein Beet geht, sonst null
+export function uniformWidth(kind = "bed") {
+  if (state.settings?.bed_mode !== "uniform" || kind !== "bed") return null;
+  return Number(state.settings.bed_width) || 1.2;
+}
+
+// Auswahl „gleiche Breite oder eigene Maße“ – für die Einstellungen und den ersten Start
+export function bedModeControl({ onChange } = {}) {
+  const uniform = state.settings?.bed_mode === "uniform";
+  const name = `bed-mode-${Math.random().toString(36).slice(2, 7)}`;
+  const opt = (value, label, checked) => {
+    const input = h("input", { type: "radio", name, value, checked });
+    input.addEventListener("change", () => { sync(); onChange?.(); });
+    return h("label", {}, input, label);
+  };
+  const seg = h("div", { class: "seg", role: "radiogroup", "aria-label": "Beete" },
+    opt("uniform", "Alle Beete gleich breit", uniform), opt("individual", "Jedes Beet eigene Maße", !uniform));
+  const width = h("input", { class: "input", name: "bed_width", inputmode: "decimal", style: { width: "90px" },
+    value: fmtInput(Number(state.settings?.bed_width) || 1.2), "aria-label": "Beetbreite in Metern" });
+  width.addEventListener("change", () => onChange?.());
+  const widthRow = h("label", { class: "bed-width-row" }, "Breite", width, "m");
+  const sync = () => { widthRow.hidden = seg.querySelector("input:checked")?.value !== "uniform"; };
+  sync();
+  return {
+    el: h("div", { class: "bed-mode" }, seg, widthRow),
+    value: () => ({ bed_mode: seg.querySelector("input:checked")?.value || "individual", bed_width: num(width.value) }),
+  };
+}
+
+// Beete, die beim Umstellen auf eine Einheitsbreite angepasst werden
+export function bedsToFit(width) {
+  return state.beds.filter((b) => b.kind === "bed" && (Math.abs(b.width - width) > 0.001 || b.length < b.width));
+}
+
+export async function saveBedMode({ bed_mode, bed_width }) {
+  if (bed_mode === "uniform" && !(bed_width >= 0.2 && bed_width <= 10)) throw new Error("Die Beetbreite bitte zwischen 0,2 und 10 m angeben");
+  const s0 = state.settings || {};
+  if (bed_mode === (s0.bed_mode || "individual") && (bed_mode !== "uniform" || Math.abs(bed_width - Number(s0.bed_width)) < 0.001)) return false;
+  if (bed_mode === "uniform") {
+    const fit = bedsToFit(bed_width);
+    if (fit.length && !(await confirmDialog(
+      `${plural(fit.length, "Beet bekommt", "Beete bekommen")} die Breite ${fmtNum(bed_width, 2)} m: ${fit.map((b) => b.name).join(", ")}. `
+      + "Quer liegende Beete werden gedreht, damit die lange Seite die Länge ist; die Sätze darin ziehen mit.",
+      { ok: "Anpassen", danger: false, title: "Beete angleichen?" }))) return null;
+  }
+  const payload = bed_mode === "uniform" ? { bed_mode, bed_width } : { bed_mode };
+  state.settings = await api.patch("/api/settings", payload);
+  await load();
+  return true;
 }
 
 function num(v) {
@@ -424,6 +475,15 @@ export function openBedEditor(bed, defaults = {}) {
     Object.entries(KIND_LABEL).map(([k, label]) => h("option", { value: k, selected: k === b.kind }, label)));
   const length = h("input", { name: "length", inputmode: "decimal", value: fmtInput(b.length) });
   const width = h("input", { name: "width", inputmode: "decimal", value: fmtInput(b.width) });
+  const widthHint = h("span", { class: "hint" });
+  // Alle Beete gleich breit: die Breite steht fest und kommt aus den Einstellungen
+  const syncWidth = () => {
+    const uw = uniformWidth(kind.value);
+    width.readOnly = !!uw;
+    if (uw) width.value = fmtInput(uw);
+    widthHint.textContent = uw ? "Gleiche Breite für alle Beete (Einstellungen)" : "";
+    widthHint.hidden = !uw;
+  };
   const rotation = h("input", { name: "rotation", inputmode: "numeric", value: Math.round(b.rotation || 0) });
   const x = h("input", { name: "x", inputmode: "decimal", value: fmtInput(b.x) });
   const y = h("input", { name: "y", inputmode: "decimal", value: fmtInput(b.y) });
@@ -454,10 +514,13 @@ export function openBedEditor(bed, defaults = {}) {
 
   ui.body.append(
     h("div", { class: "grid-2" }, field("Name", name), field("Art", kind)),
-    h("div", { class: "grid-3" }, field("Länge (m)", length), field("Breite (m)", width), field("Drehung (°)", rotation)),
+    h("div", { class: "grid-3" }, field("Länge (m)", length), h("label", { class: "field" }, h("span", {}, "Breite (m)"), width, widthHint),
+      field("Drehung (°)", rotation)),
     h("div", { class: "grid-2" }, field("Position links (m)", x), field("Position oben (m)", y)),
     field("Notizen", notes, "Zum Beispiel Bodenart, Bewässerung oder Mulch"),
   );
+  kind.addEventListener("change", syncWidth);
+  syncWidth();
   ui.foot.append(
     isNew ? null : h("button", {
       type: "button", class: "btn btn-danger", onclick: async () => {
@@ -646,8 +709,11 @@ export function openSettings() {
   const lon = h("input", { name: "weather_lon", inputmode: "decimal", placeholder: "z. B. 10,90",
     value: s.weather_lon ? fmtInput(Number(s.weather_lon)) : "" });
 
+  const bedMode = bedModeControl();
   const ui = shell("Einstellungen", {
     onSubmit: async () => {
+      const bm = bedMode.value();
+      if (bm.bed_mode === "uniform" && !(bm.bed_width >= 0.2 && bm.bed_width <= 10)) throw new Error("Die Beetbreite bitte zwischen 0,2 und 10 m angeben");
       const payload = {
         garden_name: name.value.trim() || "Mein Garten",
         rotation_years: Math.round(num(years.value) ?? 3),
@@ -669,8 +735,10 @@ export function openSettings() {
         if (!(payload.garden_width > 0) || !(payload.garden_height > 0)) throw new Error("Breite und Höhe müssen größer als 0 sein");
       }
       state.settings = await api.patch("/api/settings", payload);
+      const beds = await saveBedMode(bm);
+      if (beds === null) return false; // Angleichen abgebrochen: Dialog bleibt offen
       emit("data");
-      toast("Einstellungen gespeichert");
+      toast(beds && bm.bed_mode === "uniform" ? `Einstellungen gespeichert, alle Beete ${fmtNum(bm.bed_width, 2)} m breit` : "Einstellungen gespeichert");
     },
   });
 
@@ -763,6 +831,13 @@ export function openSettings() {
   ui.body.append(
     field("Name des Gartens", name),
     groundSection,
+    h("fieldset", {},
+      h("legend", {}, "Beete"),
+      bedMode.el,
+      h("p", { class: "muted small", style: { margin: 0 } },
+        "Gleich breite Beete: Jedes neue Beet bekommt diese Breite, auf der Karte änderst du nur noch die Länge. "
+        + "Die Pflanzreihen laufen immer entlang der langen Seite, und Sätze aus Erntezielen sind Streifen über die ganze Beetbreite. "
+        + "Gilt für Flächen der Art „Beet“; Hochbeete, Gewächshäuser und Wege behalten eigene Maße.")),
     weatherSection,
     field("Anbaupause für die Fruchtfolge (Jahre)", years,
       "Gleiche Pflanzenfamilie an gleicher Stelle innerhalb dieser Zeit wird markiert. 0 schaltet die Prüfung ab."),
@@ -808,6 +883,12 @@ export async function createBedAt(kind, cx, cy) {
 // Neue Fläche mit Lage und Größe in Metern (links oben, ungedreht)
 export async function createBedRect(kind, x, y, length, width, rotation = 0) {
   const name = nextBedName(kind);
+  const uw = uniformWidth(kind);
+  if (uw) {
+    // gleiche Beetbreite: Mitte bleibt, die Breite steht fest
+    y += (width - uw) / 2;
+    width = uw;
+  }
   const item = await create("beds", { name, kind, x: round2(x), y: round2(y), length: round2(length), width: round2(width), rotation },
     { undoLabel: `${name} angelegt` });
   select({ type: "bed", id: item.id });
