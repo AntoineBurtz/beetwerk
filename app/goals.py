@@ -1,10 +1,16 @@
-"""Ernteziele: Folgesätze rückwärts aus der gewünschten Erntemenge je Woche planen.
+"""Satzweiser Anbau: Folgesätze rückwärts aus der gewünschten Erntemenge je Kalenderwoche planen.
 
-Beispiel: 6 Köpfe Kopfsalat je Woche von KW 18 bis KW 40. Jeder Satz liefert über
-sein Erntefenster; alle paar Wochen kommt ein neuer. Aus Menge und Ertrag je Pflanze
-ergibt sich die Pflanzenzahl, aus der Kulturdauer (im Frühjahr und Herbst länger)
-Pflanz- und Aussaattermin. Die Sätze entstehen ohne Beet und laufen in die Anzucht.
+Beispiel: 6 Köpfe Kopfsalat je Woche von KW 18 bis KW 40, in den Ferien weniger. Jeder Satz
+liefert über sein Erntefenster; alle paar Wochen kommt ein neuer. Aus der Menge der Wochen,
+die ein Satz abdeckt, und dem Ertrag je Pflanze ergibt sich seine Pflanzenzahl, aus der
+Kulturdauer (im Frühjahr und Herbst länger) Pflanz- und Aussaattermin.
+
+Mit einem Beet wird die ganze Folge dort als Block angelegt: jeder Satz ist ein Streifen über
+die Beetbreite, so lang, wie seine Pflanzen brauchen. Ein Satz kommt auf die Fläche, die ein
+abgeernteter Satz gerade frei gemacht hat – so braucht die Folge so wenig Beetlänge wie möglich.
+Ohne Beet entstehen die Sätze wie bisher frei und laufen trotzdem in die Anzucht.
 """
+import json
 import math
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable, Optional
@@ -35,6 +41,15 @@ CREATE TABLE IF NOT EXISTS goals (
 );
 """
 PLANTING_COLUMNS = [("goal_id", "INTEGER"), ("goal_seq", "INTEGER")]
+GOAL_COLUMNS = [
+    ("bed_id", "INTEGER"),                          # Beet, auf dem die Folge als Block liegt
+    ("block_start", "REAL"),                        # Anfang des Blocks entlang der Beetlänge (m)
+    ("block_len", "REAL"),                          # Länge, die der Block braucht (m), beim Planen gesetzt
+    ("gap_days", "INTEGER NOT NULL DEFAULT 0"),     # Pause zwischen Abernten und Neubelegung
+    ("weeks", "TEXT NOT NULL DEFAULT '{}'"),        # abweichende Menge je Woche: {"Montag-ISO": Menge}
+]
+PLANTABLE = ("bed", "raised", "greenhouse")
+STRIP_STEP = 0.05  # Länge der Streifen in 5-cm-Schritten
 
 # Ohne eigene Klimadaten: mittlere Monatstemperaturen, wie sie für Süddeutschland typisch sind (°C)
 TYPICAL_MONTHS = [-0.5, 0.7, 4.5, 9.0, 13.4, 16.8, 18.6, 18.1, 13.9, 9.3, 4.2, 0.8]
@@ -59,10 +74,11 @@ def _err(status: int, message: str):
 
 def init(conn) -> None:
     conn.executescript(SCHEMA)
-    have = {r[1] for r in conn.execute("PRAGMA table_info(plantings)")}
-    for name, decl in PLANTING_COLUMNS:
-        if name not in have:
-            conn.execute(f"ALTER TABLE plantings ADD COLUMN {name} {decl}")
+    for table, columns in (("plantings", PLANTING_COLUMNS), ("goals", GOAL_COLUMNS)):
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in columns:
+            if name not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
 
 def suggest(crop_name: str) -> dict:
@@ -159,21 +175,62 @@ def _layout(count: int, crop: dict, bed_width: Optional[float] = None) -> dict:
     return {"rows": 1, "len": round(per_row * ps / 100, 2), "span": round(rs / 100, 2), "count": per_row}
 
 
+def _strip(count: int, crop: dict, bed: dict, uniform: bool) -> dict:
+    """Streifen über die ganze Beetbreite, gerade lang genug für so viele Pflanzen (gleich gerechnet wie die Karte).
+    Der Streifen ist mindestens einen Abstand lang: eine Reihe quer braucht ihren Reihenabstand, längs den Pflanzabstand."""
+    from .baserow import plant_count
+    rs, ps = crop["row_spacing"] or 30, crop["plant_spacing"] or 30
+    p = {"span": None, "offset": 0, "rows": None, "row_spacing": None, "plant_spacing": None, "varieties": None}
+    longest = max(bed["length"], 1.0) * 4
+    k = 1
+    while True:
+        length = round(k * STRIP_STEP, 2)
+        along = (bed["length"] >= bed["width"]) if uniform and bed["kind"] == "bed" else length >= bed["width"]
+        if length * 100 + 0.5 >= (ps if along else rs):
+            n = plant_count({**p, "len": length}, crop, bed, uniform)
+            if n >= count or length >= longest:
+                return {"rows": None, "len": length, "span": None, "count": n}
+        k += 1
+
+
+def weeks_of(goal: dict) -> dict[str, float]:
+    """Abweichende Mengen je Woche (Schlüssel: Montag der Woche, ISO)."""
+    w = goal.get("weeks")
+    if isinstance(w, str):
+        try:
+            w = json.loads(w or "{}")
+        except ValueError:
+            w = {}
+    return {str(k): float(v) for k, v in (w or {}).items() if v is not None}
+
+
+def _monday(d: date) -> date:
+    return d - timedelta(days=d.weekday())
+
+
 def successions(goal: dict, crop: dict, fd: Callable[[date, int, bool], Optional[int]],
-                bed_width: Optional[float] = None) -> list[dict]:
-    """Die Sätze, die das Ziel braucht."""
+                bed_width: Optional[float] = None, bed: Optional[dict] = None, uniform: bool = False) -> list[dict]:
+    """Die Sätze, die das Ziel braucht. Jeder Satz deckt die Tage bis zum nächsten ab; was in diesen
+    Tagen geerntet werden soll (Menge der jeweiligen Kalenderwoche), bestimmt seine Pflanzenzahl.
+    Mit Beet ist jeder Satz ein Streifen über die Beetbreite."""
     start, end = date.fromisoformat(goal["start_date"]), date.fromisoformat(goal["end_date"])
     window = goal.get("window_days") or crop["harvest_days"] or 14
     interval = goal.get("interval_days") or window
     transplant = crop["method"] == "transplant"
-    per_interval = goal["amount"] * interval / 7  # was ein Satz liefern muss
-    count = max(1, math.ceil(per_interval / (goal["yield_per_plant"] or 1)))
-    layout = _layout(count, crop, bed_width)
+    weeks = weeks_of(goal)
+    per_week = lambda d: weeks.get(_monday(d).isoformat(), goal["amount"])  # noqa: E731
+    layouts: dict[int, dict] = {}
     out = []
     n = max(1, math.ceil(((end - start).days + 1) / interval))
     for i in range(n):
         hs = start + timedelta(days=i * interval)
         he = hs + timedelta(days=window - 1)
+        last = min(hs + timedelta(days=interval - 1), end)
+        demand = sum(per_week(hs + timedelta(days=k)) for k in range((last - hs).days + 1)) / 7  # was ein Satz liefern muss
+        count = max(1, math.ceil(demand / (goal["yield_per_plant"] or 1) - 1e-9))
+        if count not in layouts:
+            layouts[count] = _strip(count, crop, bed, uniform) if bed else _layout(count, crop, bed_width)
+        layout = layouts[count]
         base = crop["field_days"] or 0
         # Spätester Pflanz- bzw. Saattag, an dem die Kultur bis zum Erntebeginn fertig wird
         planted, days = None, None
@@ -185,7 +242,10 @@ def successions(goal: dict, crop: dict, fd: Callable[[date, int, bool], Optional
                 break
         item = {"seq": i, "harvest_start": hs.isoformat(), "harvest_end": he.isoformat(), "count": layout["count"],
                 "need": count, "rows": layout["rows"], "len": layout["len"], "span": layout["span"],
+                "demand": round(demand, 2), "skip": demand <= 1e-9,
                 "field_days": days, "too_cold": planted is None}
+        if item["skip"]:  # in diesen Wochen soll nichts geerntet werden: kein Satz
+            item.update(count=0, need=0)
         if planted is None:
             item.update(sow_date=None, plant_date=None)
         elif transplant:
@@ -197,21 +257,125 @@ def successions(goal: dict, crop: dict, fd: Callable[[date, int, bool], Optional
     return out
 
 
+# ---------------------------------------------------------------- Auf einem Beet blocken
+
+def _ord(iso: Optional[str]) -> Optional[int]:
+    return date.fromisoformat(iso).toordinal() if iso else None
+
+
+def _goal_plantings(conn, gid: Optional[int]) -> dict[int, dict]:
+    if not gid:
+        return {}
+    return {p["goal_seq"]: p for p in db.rows(conn, "SELECT * FROM plantings WHERE goal_id = ?", (gid,))}
+
+
+def _pack(items: list[dict], bed: dict, start: float, fixed: list[tuple], gap: int) -> dict:
+    """Sätze nach ihrem Tag im Beet nacheinander an die erste freie Stelle ab `start` legen.
+
+    fixed: belegte Flächen (von, bis, erster Tag, letzter Tag) – andere Sätze im Beet und schon begonnene.
+    Eine Fläche ist wieder frei ab dem Tag nach dem Abernten (plus Pause). Liefert die Lage je Satz."""
+    placed = list(fixed)
+    pos, unplaced = {}, []
+    for it in sorted(items, key=lambda x: (x["t0"], x["seq"])):
+        t0, t1, ln = it["t0"], it["t1"] + gap, it["len"]
+        busy = [o for o in placed if o[2] <= t1 and t0 <= o[3]]
+        x_at = None
+        for x in sorted({start, *(round(o[1], 2) for o in busy if o[1] > start)}):
+            if x + ln > bed["length"] + 1e-6:
+                break
+            if not any(x < o[1] - 1e-6 and o[0] < x + ln - 1e-6 for o in busy):
+                x_at = x
+                break
+        if x_at is None:
+            unplaced.append(it["seq"])
+            x_at = start
+        x_at = round(x_at, 2)
+        pos[it["seq"]] = x_at
+        placed.append((x_at, x_at + ln, t0, t1))
+    ends = [pos[it["seq"]] + it["len"] for it in items]
+    return {"pos": pos, "unplaced": unplaced, "block_start": round(start, 2),
+            "block_len": round(max(ends) - start, 2) if ends else 0.0}
+
+
+def place(conn, g: dict, bed: dict, items: list[dict], start: Optional[float] = None) -> dict:
+    """Lage aller Sätze im Beet. Ohne Anfang: die Stelle, an der die Folge am wenigsten Länge braucht."""
+    own = _goal_plantings(conn, g.get("id"))
+    gap = int(g.get("gap_days") or 0)
+    fixed, todo = [], []
+    for it in items:
+        if it["too_cold"] or it["skip"]:
+            continue
+        p = own.get(it["seq"])
+        if p is not None and _started(conn, p):
+            continue  # bleibt, wie er ist (unten als belegt)
+        todo.append({"seq": it["seq"], "len": it["len"], "t0": _ord(it["plant_date"] or it["sow_date"]), "t1": _ord(it["harvest_end"])})
+    for p in db.rows(conn, "SELECT * FROM plantings WHERE bed_id = ?", (bed["id"],)):
+        if g.get("id") and p["goal_id"] == g["id"] and not _started(conn, p):
+            continue  # wird neu gelegt
+        t0 = _ord(p["plant_date"] if p["method"] == "transplant" and p["plant_date"] else p["sow_date"])
+        fixed.append((p["start"] or 0.0, (p["start"] or 0.0) + p["len"], t0, _ord(p["harvest_end"]) + gap))
+    if start is not None:
+        return _pack(todo, bed, min(max(start, 0.0), bed["length"]), fixed, gap)
+    best = None
+    for s in sorted({0.0, *(round(o[1], 2) for o in fixed if o[1] < bed["length"])}):
+        r = _pack(todo, bed, s, fixed, gap)
+        score = (len(r["unplaced"]), r["block_len"], s)
+        if best is None or score < best[0]:
+            best = (score, r)
+    return best[1]
+
+
+def _rotation_clash(conn, bed_id: int, crop: dict, year: int) -> bool:
+    years = int((conn.execute("SELECT value FROM settings WHERE key = 'rotation_years'").fetchone() or ["3"])[0] or 3)
+    if not crop.get("family") or years <= 0:
+        return False
+    for r in conn.execute("SELECT p.sow_date, p.plant_date FROM plantings p JOIN crops c ON c.id = p.crop_id "
+                          "WHERE p.bed_id = ? AND c.family = ?", (bed_id, crop["family"])):
+        y = int((r[1] or r[0])[:4])
+        if y < year and year - y <= years:
+            return True
+    return False
+
+
 def _started(conn, p: dict) -> bool:
     if p["sown_done"] or p["planted_done"] or p["harvest_done"]:
         return True
     return conn.execute("SELECT 1 FROM observations WHERE planting_id = ? LIMIT 1", (p["id"],)).fetchone() is not None
 
 
+def compute(conn, g: dict, fd) -> dict:
+    """Sätze mit Terminen, Größe und – mit Beet – ihrer Lage im Block."""
+    crop = dict(conn.execute("SELECT * FROM crops WHERE id = ?", (g["crop_id"],)).fetchone())
+    width = db.uniform_width(conn)
+    bed = _bed(conn, g.get("bed_id"))
+    items = successions(g, crop, fd, width, bed, width is not None)
+    out = {"crop": crop, "bed": bed, "items": items, "block_start": None, "block_len": None, "unplaced": []}
+    if bed:
+        r = place(conn, g, bed, items, g.get("block_start"))
+        for it in items:
+            it["start"] = r["pos"].get(it["seq"])
+            it["unplaced"] = it["seq"] in r["unplaced"]
+        out.update(block_start=r["block_start"], block_len=r["block_len"], unplaced=r["unplaced"])
+    return out
+
+
+def _bed(conn, bed_id: Optional[int]) -> Optional[dict]:
+    if not bed_id:
+        return None
+    row = conn.execute("SELECT * FROM beds WHERE id = ?", (bed_id,)).fetchone()
+    return dict(row) if row and row["kind"] in PLANTABLE else None
+
+
 def apply(conn, goal: dict, fd) -> dict:
-    """Sätze des Ziels anlegen bzw. anpassen. Begonnene Sätze (gesät, gepflanzt, bonitiert) bleiben, wie sie sind."""
-    crop = dict(conn.execute("SELECT * FROM crops WHERE id = ?", (goal["crop_id"],)).fetchone())
-    wanted = successions(goal, crop, fd, db.uniform_width(conn))
-    existing = {p["goal_seq"]: p for p in db.rows(conn, "SELECT * FROM plantings WHERE goal_id = ?", (goal["id"],))}
+    """Sätze des Ziels anlegen bzw. anpassen. Begonnene Sätze (gesät, gepflanzt, bonitiert) bleiben, wie sie sind.
+    Mit Beet liegen alle anderen danach im Block auf diesem Beet."""
+    plan_ = compute(conn, goal, fd)
+    crop, bed, wanted = plan_["crop"], plan_["bed"], plan_["items"]
+    existing = _goal_plantings(conn, goal["id"])
     created, updated, kept, removed = [], [], [], []
     for s in wanted:
         p = existing.pop(s["seq"], None)
-        if s["too_cold"]:
+        if s["too_cold"] or s["skip"]:
             if p and not _started(conn, p):
                 _drop(conn, p)
                 removed.append(p["id"])
@@ -220,9 +384,11 @@ def apply(conn, goal: dict, fd) -> dict:
                   "sow_date": s["sow_date"], "plant_date": s["plant_date"], "harvest_start": s["harvest_start"],
                   "harvest_end": s["harvest_end"], "rows": s["rows"], "len": s["len"], "span": s["span"],
                   "row_spacing": None, "plant_spacing": None, "varieties": ""}
+        if bed:
+            values.update(bed_id=bed["id"], start=s["start"], offset=0)
         if p is None:
-            record = {**values, "bed_id": None, "start": 0, "offset": 0, "goal_id": goal["id"], "goal_seq": s["seq"],
-                      "notes": f"Ernteziel: {_amount(goal)} je Woche"}
+            record = {"bed_id": None, "start": 0, "offset": 0, **values, "goal_id": goal["id"], "goal_seq": s["seq"],
+                      "notes": ""}
             cols = list(record)
             cur = conn.execute(f"INSERT INTO plantings({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
                                [record[c] for c in cols])
@@ -240,7 +406,9 @@ def apply(conn, goal: dict, fd) -> dict:
         else:
             _drop(conn, p)
             removed.append(p["id"])
-    return {"created": created, "updated": updated, "kept": kept, "removed": removed}
+    conn.execute("UPDATE goals SET block_start = ?, block_len = ? WHERE id = ?",
+                 (plan_["block_start"], plan_["block_len"], goal["id"]))
+    return {"created": created, "updated": updated, "kept": kept, "removed": removed, "unplaced": len(plan_["unplaced"])}
 
 
 def _drop(conn, p: dict) -> None:
@@ -257,8 +425,12 @@ def _amount(goal: dict) -> str:
     return f"{a:g} {goal['unit']}".replace(".", ",")
 
 
+def _public(g: dict) -> dict:
+    return {**g, "weeks": weeks_of(g)}
+
+
 def lists(conn) -> dict:
-    return {"goals": db.rows(conn, "SELECT * FROM goals ORDER BY start_date, id")}
+    return {"goals": [_public(g) for g in db.rows(conn, "SELECT * FROM goals ORDER BY start_date, id")]}
 
 
 # ---------------------------------------------------------------- Schnittstelle
@@ -275,6 +447,28 @@ class GoalIn(BaseModel):
     interval_days: Optional[int] = Field(None, ge=0, le=365)  # 0: wie das Erntefenster
     seasonal: Optional[bool] = None
     notes: Optional[str] = Field(None, max_length=2000)
+    bed_id: Optional[int] = Field(None, ge=0)                 # 0: ohne Beet
+    block_start: Optional[float] = Field(None, ge=-1, le=500)  # -1: Stelle selbst suchen
+    gap_days: Optional[int] = Field(None, ge=0, le=60)
+    weeks: Optional[dict[str, float]] = None                  # {"Montag-ISO": Menge}, nur Abweichungen
+
+    @field_validator("weeks")
+    @classmethod
+    def _weeks(cls, v):
+        if v is None:
+            return v
+        out = {}
+        for k, amount in v.items():
+            try:
+                d = date.fromisoformat(k)
+            except ValueError as exc:
+                raise ValueError("Wochen bitte als Datum ihres Montags angeben") from exc
+            if amount is None:
+                continue
+            if not 0 <= amount <= 10000:
+                raise ValueError("Die Menge je Woche liegt zwischen 0 und 10000")
+            out[_monday(d).isoformat()] = amount
+        return out
 
     @field_validator("start_date", "end_date")
     @classmethod
@@ -290,9 +484,17 @@ class GoalIn(BaseModel):
 
 def _record(conn, base: dict, body: GoalIn) -> dict:
     g = {**base, **body.model_dump(exclude_unset=True, exclude_none=True)}
-    for k in ("window_days", "interval_days"):
+    for k in ("window_days", "interval_days", "bed_id"):
         if g.get(k) == 0:
             g[k] = None
+    if g.get("block_start") is not None and g["block_start"] < 0:
+        g["block_start"] = None
+    if "bed_id" in body.model_fields_set and body.bed_id != base.get("bed_id") and "block_start" not in body.model_fields_set:
+        g["block_start"] = None  # neues Beet: Stelle neu suchen
+    if g.get("bed_id") and _bed(conn, g["bed_id"]) is None:
+        _err(422, "Auf diesem Beet lässt sich nichts anbauen")
+    g["weeks"] = json.dumps(weeks_of(g))
+    g["gap_days"] = int(g.get("gap_days") or 0)
     if "seasonal" in g:
         g["seasonal"] = int(bool(g["seasonal"]))
     for k, label in (("crop_id", "Welche Kultur?"), ("start_date", "Ab wann ernten?"), ("end_date", "Bis wann ernten?")):
@@ -310,15 +512,32 @@ def _record(conn, base: dict, body: GoalIn) -> dict:
         _err(422, "Der Abstand der Sätze ist länger als das Erntefenster – dann gibt es Lücken in der Ernte")
     g["variety"] = (g.get("variety") or "").strip()
     g["unit"] = (g.get("unit") or "Stück").strip()
+    start, end = date.fromisoformat(g["start_date"]), date.fromisoformat(g["end_date"])
+    weeks = weeks_of(g)
+    if all(weeks.get(_monday(start + timedelta(days=k)).isoformat(), g.get("amount", 1)) <= 0
+           for k in range((end - start).days + 1)):
+        _err(422, "In keiner Woche soll etwas geerntet werden")
     return g
 
 
-def _plan_out(conn, g: dict, fd, basis: str) -> dict:
-    crop = dict(conn.execute("SELECT * FROM crops WHERE id = ?", (g["crop_id"],)).fetchone())
-    items = successions(g, crop, fd, db.uniform_width(conn))
+def _plan_out(conn, g: dict, fd, basis: str, with_beds: bool = False) -> dict:
+    r = compute(conn, g, fd)
+    crop, items = r["crop"], r["items"]
     window = g.get("window_days") or crop["harvest_days"] or 14
-    return {"successions": items, "basis": basis, "window_days": window, "interval_days": g.get("interval_days") or window,
-            "method": crop["method"], "plants": sum(s["count"] for s in items if not s["too_cold"])}
+    out = {"successions": items, "basis": basis, "window_days": window, "interval_days": g.get("interval_days") or window,
+           "method": crop["method"], "plants": sum(s["count"] for s in items if not s["too_cold"]),
+           "bed_id": r["bed"]["id"] if r["bed"] else None, "block_start": r["block_start"], "block_len": r["block_len"],
+           "unplaced": len(r["unplaced"])}
+    if with_beds:
+        # Wie die Folge auf jedes Beet passen würde (jeweils an der günstigsten Stelle)
+        year = date.fromisoformat(g["start_date"]).year
+        beds = []
+        for bed in db.rows(conn, f"SELECT * FROM beds WHERE kind IN ({','.join('?' for _ in PLANTABLE)}) ORDER BY sort, id", PLANTABLE):
+            rb = compute(conn, {**g, "bed_id": bed["id"], "block_start": None}, fd)
+            beds.append({"bed_id": bed["id"], "block_start": rb["block_start"], "block_len": rb["block_len"],
+                         "unplaced": len(rb["unplaced"]), "rotation": _rotation_clash(conn, bed["id"], crop, year)})
+        out["beds"] = beds
+    return out
 
 
 @router.get("/api/goals/suggest")
@@ -331,13 +550,19 @@ def goal_suggest(crop_id: int):
 
 
 @router.post("/api/goals/preview")
-def goal_preview(body: GoalIn):
-    """Was das Ziel ergäbe, ohne zu speichern."""
+def goal_preview(body: GoalIn, goal_id: Optional[int] = None, beds: bool = False):
+    """Was das Ziel ergäbe, ohne zu speichern. goal_id: beim Ändern die eigenen Sätze nicht als belegt zählen."""
     with db.session() as conn:
-        g = _record(conn, {"amount": 1, "unit": "Stück", "yield_per_plant": 1, "seasonal": 1}, body)
+        base = {"amount": 1, "unit": "Stück", "yield_per_plant": 1, "seasonal": 1}
+        if goal_id:
+            row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
+            if row is None:
+                _err(404, "Dieses Ernteziel gibt es nicht")
+            base = dict(row)
+        g = _record(conn, base, body)
     fd, basis = duration_model(bool(g["seasonal"]))
     with db.session() as conn:
-        return _plan_out(conn, g, fd, basis)
+        return _plan_out(conn, g, fd, basis, beds)
 
 
 @router.post("/api/goals", status_code=201)
@@ -352,7 +577,7 @@ def create_goal(body: GoalIn):
                            [g[c] for c in cols])
         g["id"] = cur.lastrowid
         result = apply(conn, g, fd)
-        return {"goal": dict(conn.execute("SELECT * FROM goals WHERE id = ?", (g["id"],)).fetchone()), **result,
+        return {"goal": _public(dict(conn.execute("SELECT * FROM goals WHERE id = ?", (g["id"],)).fetchone())), **result,
                 "basis": basis}
 
 
@@ -372,7 +597,7 @@ def update_goal(gid: int, body: GoalIn):
         cols = [k for k in g if k not in ("id", "created_at")]
         conn.execute(f"UPDATE goals SET {', '.join(f'{k} = ?' for k in cols)} WHERE id = ?", [*[g[c] for c in cols], gid])
         result = apply(conn, g, fd)
-        return {"goal": dict(conn.execute("SELECT * FROM goals WHERE id = ?", (gid,)).fetchone()), **result, "basis": basis}
+        return {"goal": _public(dict(conn.execute("SELECT * FROM goals WHERE id = ?", (gid,)).fetchone())), **result, "basis": basis}
 
 
 @router.delete("/api/goals/{gid}", status_code=204)

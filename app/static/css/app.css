@@ -1476,7 +1476,43 @@ table.occ td.over { background: var(--alert-soft); color: var(--alert); font-wei
 .goal-what { color: var(--ink-2); }
 .goal-sub { grid-column: 2 / -1; }
 .goal-main:hover .goal-title { text-decoration: underline; }
-dialog.goal-dialog { width: min(760px, calc(100vw - 24px)); }
+dialog.goal-dialog { width: min(780px, calc(100vw - 24px)); }
+/* Menge je Kalenderwoche */
+.weeks-set { display: grid; gap: 8px; }
+.week-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 6px; }
+.week { display: grid; gap: 2px; padding: 4px 6px 6px; border: 1px solid var(--line); border-radius: var(--r-s); background: var(--surface); font-size: 12px; color: var(--ink-2); }
+.week input { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 3px; padding: 3px 5px; font: 500 14px/1.2 var(--font); background: var(--surface); }
+.week.set { border-color: var(--leaf); background: var(--leaf-soft); }
+.week.set span { color: var(--leaf); font-weight: 600; }
+/* Beet und Block */
+.goal-bed { display: grid; gap: 10px; }
+.grid-bed { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 12px; }
+.goal-block { display: grid; gap: 6px; min-width: 0; }
+.goal-block:empty { display: none; }
+.goal-more summary { cursor: pointer; font-weight: 500; color: var(--ink-2); padding: 4px 0; }
+.goal-more[open] { display: grid; gap: 10px; }
+table.goal-table tr.bad td { color: var(--alert); }
+/* Beetplan: Zeit nach rechts, Beetlänge nach unten */
+.bedplan-wrap { display: grid; gap: 2px; min-width: 0; }
+.bedplan { width: 100%; height: auto; display: block; }
+.bedplan .bp-bed { fill: #efe8dd; stroke: var(--line-strong); stroke-width: 1; }
+.bedplan .bp-grid { stroke: rgba(29, 43, 36, .12); stroke-width: 1; }
+.bedplan .bp-axis { font: 500 10.5px var(--font); fill: var(--ink-3); }
+.bedplan .bp-other { fill: #c9c3b8; stroke: #fff; stroke-width: 1; }
+.bedplan .bp-block { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.bedplan .bp-outline { fill: none; stroke: #fff; stroke-width: 1.5; }
+.bedplan .bp-item.bad .bp-outline { stroke: var(--alert); stroke-width: 2; stroke-dasharray: 4 3; }
+.bedplan .bp-item.link { cursor: pointer; }
+.bedplan .bp-item.link:hover .bp-outline { stroke: var(--ink); }
+.bedplan .bp-label { font: 700 10.5px var(--font); fill: var(--ink); paint-order: stroke; stroke: rgba(255, 255, 255, .8); stroke-width: 3px; }
+.bedplan .bp-day { stroke: var(--signal); stroke-width: 2; }
+.bedplan-legend { margin: 0; }
+.plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.map-svg .block-outline { fill: none; stroke-width: 1.6; stroke-dasharray: 7 4; }
+.map-svg .block-label { fill: var(--ink-2); font-weight: 600; }
+@media (max-width: 560px) {
+  .grid-bed { grid-template-columns: minmax(0, 1fr) 100px; }
+}
 .goal-preview { display: grid; gap: 8px; }
 .goal-preview:empty { display: none; }
 .goal-sum { margin: 0; font-size: 15px; }

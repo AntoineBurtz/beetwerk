@@ -195,8 +195,8 @@ export function mountNursery(root) {
   function planView() {
     if (!plan.batches.length) {
       return h("div", { class: "empty-note" },
-        `Für ${year} gibt es noch keine Anzucht. Sie entsteht aus den Sätzen mit „Anzucht und Pflanzung“, aus Erntezielen und aus den Wünschen deiner Freunde. `,
-        h("button", { type: "button", class: "link", onclick: () => openGoalEditor(null, { year }) }, "Ernteziel planen"),
+        `Für ${year} gibt es noch keine Anzucht. Sie entsteht aus den Sätzen mit „Anzucht und Pflanzung“, aus dem satzweisen Anbau und aus den Wünschen deiner Freunde. `,
+        h("button", { type: "button", class: "link", onclick: () => openGoalEditor(null, { year }) }, "Satzweise anbauen"),
         plan.years.length ? h("div", { style: { marginTop: "8px" } }, "Anzucht gibt es in: ",
           plan.years.flatMap((y, i) => [i ? ", " : "", h("button", { type: "button", class: "link",
             onclick: () => { year = Number(y); plan = null; jump = true; render(); load(); } }, y)])) : null);
@@ -230,7 +230,7 @@ export function mountNursery(root) {
       h("div", { class: "section-head" }, h("h2", {}, `Wochenplan ${year}`),
         h("span", { class: "muted small" }, "Aus den Sätzen mit Anzucht und den Wünschen deiner Freunde"), toggle,
         h("button", { type: "button", class: "btn btn-sm", title: "Folgesätze aus der gewünschten Erntemenge je Woche",
-          onclick: () => openGoalEditor(null, { year }) }, "Ernteziel planen")),
+          onclick: () => openGoalEditor(null, { year }) }, "Satzweise anbauen")),
       list.length ? list : h("div", { class: "empty-note" }, "Alles erledigt."));
   }
 

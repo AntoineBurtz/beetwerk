@@ -2,7 +2,7 @@
 import { state, find, create, patch, remove, issuesOf, api, replaceAll, select, emit, setMode, setDay, load } from "./store.js";
 import {
   h, dayNum, isoOf, datesFromCrop, rowCount, plantCount, spanOf, fmtNum, KIND_LABEL, PLANTABLE,
-  phases, rectOf, round2, clamp, plural, fmtDay, isMixed, varietyText,
+  phases, rectOf, round2, clamp, plural, fmtDay, isMixed, varietyText, yearOf,
 } from "./util.js";
 import { toast, confirmDialog, icon } from "./ui.js";
 import { mixEditor } from "./mix.js";
@@ -10,6 +10,7 @@ import { SOILS, soilOf, FROST_OPTIONS, frostSummary } from "./weather.js";
 import { openGeoSetup } from "./geosetup.js";
 import { baserowSection } from "./baserowsetup.js";
 import { researchSection } from "./researchsetup.js";
+import { openGoalEditor } from "./goals.js";
 
 export function shell(title, { onSubmit, extraHead } = {}) {
   const dlg = h("dialog");
@@ -408,8 +409,17 @@ export function openPlantingEditor(planting, defaults = {}) {
 
   const issueList = isNew ? [] : issuesOf(p.id);
 
+  // Neuer Satz: wer gleich mehrere nacheinander will, nimmt den satzweisen Anbau
+  const seriesLink = isNew ? h("p", { class: "small muted", style: { margin: 0 } }, "Mehrere Sätze nacheinander, z. B. Salat alle zwei Wochen? ",
+    h("button", { type: "button", class: "link", onclick: () => {
+      ui.dlg.close();
+      const anchor = defaults.anchor ?? state.day;
+      openGoalEditor(null, { year: yearOf(anchor), bed_id: bedSel.value ? Number(bedSel.value) : null,
+        crop_id: cropSel.value ? Number(cropSel.value) : null });
+    } }, "Satzweise anbauen")) : null;
   ui.body.append(
-    p.goal_id && !isNew ? h("p", { class: "note-inline" }, "Dieser Satz gehört zu einem Ernteziel. Termine und Größe passt das Ziel an, wenn du es änderst – solange der Satz noch nicht gesät ist. Beet und Lage bleiben.") : null,
+    seriesLink,
+    p.goal_id && !isNew ? h("p", { class: "note-inline" }, "Dieser Satz gehört zu einem satzweisen Anbau. Termine, Größe und – wenn die Folge ein Beet hat – die Lage passt die Folge an, wenn du sie änderst, solange der Satz noch nicht gesät ist.") : null,
     h("div", { class: "grid-2" }, field("Kultur", cropSel),
       h("div", { class: "field" }, h("span", { id: "pl-variety-label" }, "Sorte"), variety, mixSummary,
         h("label", { class: "check" }, mixedChk, "Mehrere Sorten (Mischsatz)")),

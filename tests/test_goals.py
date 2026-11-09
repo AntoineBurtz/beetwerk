@@ -42,8 +42,10 @@ def test_preview_fixed_duration(client):
     assert r.status_code == 200, r.text
     out = r.json()
     s = out["successions"]
-    assert len(s) == 11 and out["interval_days"] == 14 and out["basis"] == "fest" and out["plants"] == 132
-    assert all((x["count"], x["rows"], x["len"], x["span"]) == (12, 3, 1.2, 0.9) for x in s)
+    # der letzte Satz muss nur noch die letzte Woche bis Ende September liefern
+    assert len(s) == 11 and out["interval_days"] == 14 and out["basis"] == "fest" and out["plants"] == 126
+    assert all((x["count"], x["rows"], x["len"], x["span"]) == (12, 3, 1.2, 0.9) for x in s[:-1])
+    assert (s[-1]["count"], s[-1]["demand"]) == (6, 6)
     assert (s[0]["sow_date"], s[0]["plant_date"], s[0]["harvest_start"], s[0]["harvest_end"]) == \
         ("2031-02-24", "2031-03-24", "2031-05-05", "2031-05-18")
     assert s[1]["harvest_start"] == "2031-05-19" and s[-1]["harvest_start"] == "2031-09-22"
@@ -149,3 +151,90 @@ def test_typical_temperatures_are_smooth():
     assert len(t) == 365 and min(t) < 0 < max(t) < 20
     assert abs(t[goals.weather._norm(date(2001, 7, 15))] - 18.6) < 0.01
     assert all(abs(a - b) < 0.5 for a, b in zip(t, t[1:]))
+
+
+# ---------------------------------------------------------------- Mengen je Woche und Block auf einem Beet
+
+def _bed(client, name, length=6.0, width=1.2):
+    return client.post("/api/beds", json={"name": name, "kind": "bed", "x": 20, "y": 20, "length": length, "width": width}).json()
+
+
+def test_amount_per_week_changes_satz_size(client):
+    salat = _crop(client, "Kopfsalat")
+    body = {"crop_id": salat["id"], "start_date": "2033-05-02", "end_date": "2033-06-26", "amount": 6, "unit": "Köpfe",
+            "yield_per_plant": 1, "seasonal": False,
+            # KW 21/22 doppelt so viel, ab KW 23 nichts (Urlaub); ein Tag zählt für den Montag seiner Woche
+            "weeks": {"2033-05-23": 12, "2033-06-01": 12, "2033-06-06": 0, "2033-06-13": 0, "2033-06-20": 0}}
+    s = client.post("/api/goals/preview", json=body).json()["successions"]
+    assert [x["demand"] for x in s] == [12, 18, 12, 0]
+    assert [x["count"] for x in s] == [12, 18, 12, 0] and s[3]["skip"]
+    none = client.post("/api/goals/preview", json={**body, "end_date": "2033-05-08", "weeks": {"2033-05-02": 0}})
+    assert none.status_code == 422 and "keiner Woche" in none.json()["detail"]
+
+
+def test_block_reuses_harvested_strips(client):
+    salat = _crop(client, "Kopfsalat")
+    bed = _bed(client, "Salatbeet")
+    body = {"crop_id": salat["id"], "start_date": "2033-05-02", "end_date": "2033-08-21", "amount": 6, "unit": "Köpfe",
+            "yield_per_plant": 1, "seasonal": False, "bed_id": bed["id"]}
+    out = client.post("/api/goals/preview", json=body).json()
+    s = out["successions"]
+    # 12 Köpfe je Satz: Streifen 0,9 m über die Beetbreite; 8 Wochen im Beet, alle 2 Wochen ein neuer:
+    # vier Streifen reichen, der fünfte Satz kommt dorthin, wo der erste gerade abgeerntet ist
+    assert all((x["len"], x["span"], x["rows"], x["count"]) == (0.9, None, None, 12) for x in s)
+    assert [x["start"] for x in s] == [0, 0.9, 1.8, 2.7, 0, 0.9, 1.8, 2.7]
+    assert (out["block_start"], out["block_len"], out["unplaced"]) == (0, 3.6, 0)
+    # einen Tag Pause vor der Neubelegung: dann braucht es einen Streifen mehr
+    gap = client.post("/api/goals/preview", json={**body, "gap_days": 1}).json()
+    assert gap["block_len"] == 4.5
+    # zu kurzes Beet: was nicht passt, wird gemeldet
+    short = _bed(client, "Kurz", length=2.0)
+    tight = client.post("/api/goals/preview", json={**body, "bed_id": short["id"]}).json()
+    assert tight["unplaced"] > 0
+
+    # Anlegen: alle Sätze liegen im Block
+    r = client.post("/api/goals", json=body).json()
+    gid = r["goal"]["id"]
+    assert (r["goal"]["bed_id"], r["goal"]["block_start"], r["goal"]["block_len"]) == (bed["id"], 0, 3.6)
+    ps = _goal_plantings(client, gid)
+    assert [(p["bed_id"], p["start"], p["span"]) for p in ps] == [(bed["id"], x, None) for x in [0, 0.9, 1.8, 2.7, 0, 0.9, 1.8, 2.7]]
+
+    # Ein fremder Satz vorne im Beet: die Folge rückt dahinter
+    other = client.post("/api/plantings", json={"crop_id": _crop(client, "Möhre")["id"], "method": "direct", "bed_id": bed["id"],
+                                                "start": 0, "len": 1.5, "sow_date": "2033-03-01", "harvest_start": "2033-07-01",
+                                                "harvest_end": "2033-09-30"}).json()
+    moved = client.patch(f"/api/goals/{gid}", json={"block_start": -1}).json()
+    assert moved["goal"]["block_start"] == 1.5 and moved["unplaced"] == 0
+    assert min(p["start"] for p in _goal_plantings(client, gid)) == 1.5
+
+    # Begonnener Satz bleibt liegen, die übrigen ordnen sich drumherum
+    first = _goal_plantings(client, gid)[0]
+    client.patch(f"/api/plantings/{first['id']}", json={"sown_done": True})
+    more = client.patch(f"/api/goals/{gid}", json={"amount": 9}).json()
+    assert first["id"] in more["kept"]
+    ps = {p["id"]: p for p in _goal_plantings(client, gid)}
+    assert ps[first["id"]]["len"] == 0.9 and ps[first["id"]]["start"] == 1.5
+    assert all(p["len"] == 1.5 for i, p in ps.items() if i != first["id"])  # 18 Köpfe: 1,5 m
+
+    # Beet wählen und wieder ohne Beet; Beet löschen nimmt der Folge das Beet
+    # mit der Möhre vorne passen die längeren Streifen nicht mehr alle ins Beet – das sagt die Vorschau je Beet
+    beds = client.post(f"/api/goals/preview?goal_id={gid}&beds=true", json={}).json()["beds"]
+    assert next(b for b in beds if b["bed_id"] == bed["id"])["unplaced"] == 2
+    client.delete(f"/api/plantings/{other['id']}")
+    client.patch(f"/api/plantings/{first['id']}", json={"sown_done": False})
+    beds = client.post(f"/api/goals/preview?goal_id={gid}&beds=true", json={}).json()["beds"]
+    mine = next(b for b in beds if b["bed_id"] == bed["id"])
+    assert mine["unplaced"] == 0 and mine["block_len"] == 6.0
+    assert client.delete(f"/api/beds/{short['id']}").status_code == 204
+    client.delete(f"/api/goals/{gid}")
+
+
+def test_strip_is_at_least_one_spacing_long():
+    crop = {"row_spacing": 30, "plant_spacing": 30}
+    bed = {"kind": "bed", "length": 6.0, "width": 1.2}
+    # vier Köpfe: eine Reihe quer über das Beet braucht ihren Reihenabstand, nicht nur 5 cm
+    assert goals._strip(4, crop, bed, False) == {"rows": None, "len": 0.3, "span": None, "count": 4}
+    assert goals._strip(12, crop, bed, False)["len"] == 0.9
+    # gleich breite Beete: Reihen längs, vier nebeneinander über die Breite
+    assert goals._strip(4, crop, bed, True) == {"rows": None, "len": 0.3, "span": None, "count": 4}
+    assert goals._strip(5, crop, bed, True)["len"] == 0.6

@@ -10,6 +10,7 @@ import { iconBtn, icon, confirmDialog, replaceKeepingFocus } from "./ui.js";
 import { bedSummary, bedUsage } from "./bedpanel.js";
 import { openPlantingOverview, openGoalOverview, plantingStatus } from "./overview.js";
 import { bulkBar, markedPlantings } from "./bulk.js";
+import { openGoalEditor } from "./goals.js";
 import { weatherSpan, weatherBand, weatherEnabled, frostFor, frostSpan, frostOverlay, WX_H } from "./weather.js";
 
 const ZOOMS = [1.3, 2, 3, 4.6, 7, 11];
@@ -175,6 +176,8 @@ export function mountTimeline(root) {
         onClose: () => select(null),
         actions: [
           h("button", { type: "button", class: "btn btn-sm btn-primary", onclick: () => openBedEditor(bed), title: "Name, Größe, Lage und Notizen ändern" }, icon("edit"), "Bearbeiten"),
+          PLANTABLE.has(bed.kind) ? h("button", { type: "button", class: "btn btn-sm", title: "Folgesätze aus der Erntemenge je Woche, als Block auf diesem Beet",
+            onclick: () => openGoalEditor(null, { year: yearOf(state.day), bed_id: bed.id }) }, "Satzweise anbauen") : null,
           h("button", { type: "button", class: "btn btn-sm", onclick: () => { location.hash = "karte"; } }, "Auf der Karte zeigen"),
           h("button", { type: "button", class: "btn btn-sm btn-danger", onclick: () => deleteBed(bed) }, icon("trash"), "Löschen"),
         ],
