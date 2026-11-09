@@ -11,7 +11,7 @@ import { shell, openCropEditor, openBedEditor, openPlantingEditor, followUp, goa
 import { miniTimeline, rotationHistory } from "./bedpanel.js";
 import { openVarietyDetail, openVarietyEditor, varietyThumb } from "./varieties.js";
 import { cardTraits } from "./profileform.js";
-import { openGoalEditor, goalPlantings, bedPlan, itemsOf } from "./goals.js";
+import { openGoalEditor, goalPlantings, bedPlan, itemsOf, showGoalOnMap } from "./goals.js";
 import { openBonitur } from "./bonitur.js";
 import { mixLegend } from "./mix.js";
 
@@ -442,6 +442,8 @@ export function openGoalOverview(g0) {
       paintToggle();
       return [
         location.hash.replace("#", "") === "zeitleiste" ? toggle : null,
+        h("button", { type: "button", class: "btn", title: "Stichtag in die Zeit der Folge setzen und das Beet auf der Karte zeigen",
+          onclick: () => { const g = (state.goals || []).find((x) => x.id === g0.id); ui.dlg.close(); if (g) showGoalOnMap(g); } }, "Auf der Karte"),
         h("span", { class: "spacer" }),
         h("button", { type: "button", class: "btn btn-quiet", onclick: () => ui.dlg.close() }, "Schließen"),
         h("button", { type: "submit", class: "btn btn-primary" }, icon("edit"), "Bearbeiten")];

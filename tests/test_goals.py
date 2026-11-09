@@ -190,7 +190,9 @@ def test_block_reuses_harvested_strips(client):
     # zu kurzes Beet: was nicht passt, wird gemeldet
     short = _bed(client, "Kurz", length=2.0)
     tight = client.post("/api/goals/preview", json={**body, "bed_id": short["id"]}).json()
-    assert tight["unplaced"] > 0
+    # zwei Streifen passen, die übrigen Sätze bleiben ohne Beet statt sich zu überdecken
+    assert tight["unplaced"] == 4 and tight["block_len"] == 1.8
+    assert [x["start"] for x in tight["successions"]] == [0, 0.9, None, None, 0, 0.9, None, None]
 
     # Anlegen: alle Sätze liegen im Block
     r = client.post("/api/goals", json=body).json()
@@ -238,3 +240,15 @@ def test_strip_is_at_least_one_spacing_long():
     # gleich breite Beete: Reihen längs, vier nebeneinander über die Breite
     assert goals._strip(4, crop, bed, True) == {"rows": None, "len": 0.3, "span": None, "count": 4}
     assert goals._strip(5, crop, bed, True)["len"] == 0.6
+
+
+def test_satz_without_room_waits_without_bed(client):
+    salat = _crop(client, "Kopfsalat")
+    short = _bed(client, "Kurzbeet", length=2.0)
+    r = client.post("/api/goals", json={"crop_id": salat["id"], "start_date": "2034-05-01", "end_date": "2034-08-20", "amount": 6,
+                                        "unit": "Köpfe", "yield_per_plant": 1, "seasonal": False, "bed_id": short["id"]}).json()
+    assert r["unplaced"] == 4
+    ps = _goal_plantings(client, r["goal"]["id"])
+    assert sorted((p["bed_id"] is None) for p in ps) == [False] * 4 + [True] * 4
+    assert r["goal"]["block_len"] == 1.8
+    client.delete(f"/api/goals/{r['goal']['id']}")

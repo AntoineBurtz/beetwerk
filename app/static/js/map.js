@@ -19,6 +19,7 @@ import { openGoalEditor, blockGoalOf, moveBlock } from "./goals.js";
 
 const U = 100; // SVG-Einheiten pro Meter, also Zentimeter
 const UPCOMING_DAYS = 21;
+const BLOCK_AHEAD = 150; // so viele Tage vor der Satzfolge ist ihr Block auf der Karte schon zu sehen
 
 let view = null; // { x, y, w, h } bleibt beim Wechsel der Ansicht erhalten
 let cropQuery = "";
@@ -391,12 +392,14 @@ export function mountMap(root) {
     return { start: r.x, len: r.w, offset: r.y, span: r.h < bed.width - 0.001 ? r.h : null };
   }
 
-  // Block einer Satzfolge: gestrichelter Rahmen über ihre Länge, solange die Folge läuft
+  // Block einer Satzfolge: gestrichelter Rahmen über ihre Länge – solange die Folge läuft und schon
+  // in den Monaten davor, damit man beim Planen sieht, dass die Fläche vergeben ist
   function drawBlock(goal, bed, k) {
     const ps = state.plantings.filter((p) => p.goal_id === goal.id && p.bed_id === bed.id);
     if (!ps.length) return null;
     const from = Math.min(...ps.map((p) => phases(p).fieldStart)), to = Math.max(...ps.map((p) => phases(p).he));
-    if (state.day < from - UPCOMING_DAYS || state.day > to) return null;
+    if (state.day < from - BLOCK_AHEAD || state.day > to) return null;
+    const ahead = state.day < from;
     const crop = find.crop(goal.crop_id);
     const x = (goal.block_start || 0) * U, w = goal.block_len * U, hh = bed.width * U;
     const g = s("g", { class: "block", "pointer-events": "none" });
@@ -405,7 +408,7 @@ export function mountMap(root) {
     const fs = Math.min(10.5 * k, hh * 0.22);
     if (w / k > 90 && hh / k > 34) {
       g.append(s("text", { class: "pl-label block-label", x: x + 5 * k, y: hh - 5 * k, style: `font-size:${fs}px; stroke-width:${3 * k}px` },
-        `Satzfolge ${crop?.name ?? ""}`));
+        `Satzfolge ${crop?.name ?? ""}${ahead ? ` ab ${fmtDay(from, { year: yearOf(from) !== yearOf(state.day) })}` : ""}`));
     }
     return g;
   }

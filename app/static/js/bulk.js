@@ -1,8 +1,8 @@
 // Mehrere markierte Sätze gemeinsam ändern oder löschen (Zeitleiste und Liste unter „Sätze“)
-import { state, find, patchMany, removeMany, clearMarks } from "./store.js";
+import { state, find, api, load, patchMany, removeMany, clearMarks, mark } from "./store.js";
 import { h, phases, isoOf, dayNum, fmtDay, round2, clamp, PLANTABLE, isMixed, plural } from "./util.js";
 import { shell, field, firstFreeStart } from "./editor.js";
-import { confirmDialog, icon, iconBtn } from "./ui.js";
+import { confirmDialog, icon, iconBtn, toast } from "./ui.js";
 
 const DATES = ["sow_date", "plant_date", "harvest_start", "harvest_end"];
 const FLAGS = [["sown_done", "Gesät"], ["planted_done", "Gepflanzt"], ["harvest_done", "Abgeerntet"]];
@@ -37,11 +37,42 @@ export function bulkBar(ps, { extra = [] } = {}) {
   ].filter(Boolean);
 }
 
+// Satzweise Anbauten, deren Sätze alle unter den markierten sind
+function emptiedGoals(ps) {
+  const ids = new Set(ps.map((p) => p.id));
+  return (state.goals || []).filter((g) => {
+    const own = state.plantings.filter((p) => p.goal_id === g.id);
+    return own.length > 0 && own.every((p) => ids.has(p.id));
+  });
+}
+
 export async function deleteMarked(ps) {
-  const ok = await confirmDialog(`${count(ps.length)} werden gelöscht: ${markedSummary(ps)}. Mit „Rückgängig“ holst du sie zurück.`,
+  const empty = emptiedGoals(ps);
+  const goalNames = empty.map((g) => `${find.crop(g.crop_id)?.name ?? "Kultur"}${g.variety ? ` ${g.variety}` : ""}`).join(", ");
+  const ok = await confirmDialog(`${count(ps.length)} werden gelöscht: ${markedSummary(ps)}. Mit „Rückgängig“ holst du sie zurück.`
+    + (empty.length ? ` Damit ${empty.length === 1 ? "ist der satzweise Anbau" : "sind die satzweisen Anbauten"} ${goalNames} leer und ${empty.length === 1 ? "wird" : "werden"} mit gelöscht.` : ""),
     { title: `${count(ps.length)} löschen?` });
   if (!ok) return false;
-  await removeMany("plantings", ps.map((p) => p.id), { undoLabel: `${count(ps.length)} gelöscht` });
+  const { done, failed } = await removeMany("plantings", ps.map((p) => p.id), { undoLabel: (n) => `${count(n)} gelöscht` });
+  // leere Folgen mit löschen, damit sie nicht in Karte, Zeitleiste und Liste stehen bleiben
+  const gone = empty.filter((g) => !state.plantings.some((p) => p.goal_id === g.id));
+  if (gone.length) {
+    for (const g of gone) {
+      try { await api.del(`/api/goals/${g.id}?keep=true`); } catch { /* bleibt dann stehen */ }
+    }
+    await load();
+  }
+  if (failed.length) {
+    // Was nicht ging (meist Sätze mit Boniturwerten), bleibt markiert und wird genannt
+    state.marked.clear();
+    for (const f of failed) state.marked.add(f.id);
+    mark([], true);
+    const names = failed.map((f) => find.crop(f.item.crop_id)?.name ?? "Satz").join(", ");
+    const reason = failed.every((f) => /Boniturwert/.test(f.message))
+      ? "es gibt Boniturwerte dafür – erst in der Bonitur löschen oder die Sätze behalten" : failed[0].message;
+    toast(`${done ? `${count(done)} gelöscht. ` : ""}${count(failed.length)} nicht (${names}): ${reason}.`, { error: true, ms: 9000 });
+    return done > 0;
+  }
   clearMarks();
   return true;
 }
