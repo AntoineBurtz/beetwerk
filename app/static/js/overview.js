@@ -11,7 +11,7 @@ import { shell, openCropEditor, openBedEditor, openPlantingEditor, followUp, goa
 import { miniTimeline, rotationHistory } from "./bedpanel.js";
 import { openVarietyDetail, openVarietyEditor, varietyThumb } from "./varieties.js";
 import { cardTraits } from "./profileform.js";
-import { openGoalEditor, openAssign, goalPlantings } from "./goals.js";
+import { openGoalEditor, goalPlantings, bedPlan, itemsOf } from "./goals.js";
 import { openBonitur } from "./bonitur.js";
 import { mixLegend } from "./mix.js";
 
@@ -369,7 +369,7 @@ export function openGoalOverview(g0) {
   liveDialog({
     get: () => (state.goals || []).find((g) => g.id === g0.id),
     title: (g) => `${find.crop(g.crop_id)?.name ?? "Kultur"}${g.variety ? ` ${g.variety}` : ""}`,
-    extraHead: () => h("span", { class: "var-head-crop" }, "Ernteziel"),
+    extraHead: () => h("span", { class: "var-head-crop" }, "Satzweiser Anbau"),
     onEdit: (g) => openGoalEditor(g),
     cls: "goal-ov",
     render: (g) => {
@@ -394,7 +394,7 @@ export function openGoalOverview(g0) {
             const { p, ph, bed } = it;
             const done = DONE.find(([k]) => p[k]);
             return h("button", { type: "button", class: "ov-row", onclick: () => openPlantingOverview(p) },
-              h("span", { class: "ov-row-main" }, h("strong", {}, `Satz ${i + 1}`),
+              h("span", { class: "ov-row-main" }, h("strong", {}, `Satz ${(p.goal_seq ?? i) + 1}`),
                 h("span", { class: "muted" }, ` · ${bed ? bed.name : "ohne Beet"}`),
                 done ? h("span", { class: "src src-bonitur" }, done[1]) : null,
                 issuesOf(p.id).length ? h("span", { class: "flag-dot", title: issuesOf(p.id).map((x) => x.text).join("\n") }, "!") : null),
@@ -404,18 +404,25 @@ export function openGoalOverview(g0) {
               miniTimeline(p, null, range));
           }));
       }
+      const bed = find.bed(g.bed_id);
+      const odd = Object.entries(g.weeks || {}).sort();
       return [
         facts([
           ["Kultur", cropLink(crop)],
           ["Sorte", g.variety ? varietyLink(g.crop_id, g.variety) : null],
-          ["Ziel", `${fmtNum(g.amount)} ${g.unit} je Woche`],
+          ["Ziel", `${fmtNum(g.amount)} ${g.unit} je Woche`
+            + (odd.length ? ` · abweichend ${odd.map(([iso, a]) => `KW ${isoWeek(dayNum(iso))}: ${fmtNum(a)}`).join(", ")}` : "")],
+          ["Beet", bed ? [bedLink(bed), ` · ${fmtNum(g.block_len || 0, 2)} m ab ${fmtNum(g.block_start || 0, 2)} m (${fmtNum((g.block_len || 0) * bed.width, 1)} m²)`] : "noch keins"],
           ["Erntezeit", `${fmtDay(gs)} bis ${fmtDay(ge, { year: true })} (KW ${isoWeek(gs)} bis ${isoWeek(ge)})`],
           ["Sätze", items.length ? `${items.length}${interval ? `, alle ${plural(interval, "Tag", "Tage")}` : ""}` : "keine"],
           ["Pflanzen", items.length ? `${items.reduce((n, it) => n + count(it), 0)} zusammen` : null],
           ["Stand", items.length ? `${sown} von ${items.length} gesät${next ? ` · nächste Aussaat ${fmtDay(next.ph.sow, { year: yearOf(next.ph.sow) !== yearOf(state.day) })}` : ""}` : null],
         ]),
-        loose ? h("p", { class: "small", style: { margin: 0 } },
-          `${plural(loose, "Satz hat", "Sätze haben")} noch kein Beet. `, link("Beete vorschlagen", () => openAssign(g))) : null,
+        bed ? bedPlan(bed, itemsOf(g), { color: crop?.color, block: { start: g.block_start || 0, len: g.block_len || 0 },
+          excludeGoal: g.id, width: 640, onItem: (p) => openPlantingOverview(p) }) : null,
+        loose && !bed ? h("p", { class: "small", style: { margin: 0 } },
+          `${plural(loose, "Satz hat", "Sätze haben")} noch kein Beet. `,
+          link("Beet wählen", () => openGoalEditor(g, { focus: "bed" })), " – dann liegen alle Sätze als Block auf diesem Beet.") : null,
         rows ? block(blockHead("Sätze"), rows) : h("p", { class: "muted" }, "Zu diesem Ziel gibt es keine Sätze mehr."),
         g.notes ? block("Notizen", h("p", { class: "var-notes" }, g.notes)) : null,
       ];

@@ -15,6 +15,7 @@ import { bedSummary, bedUsage, miniTimeline } from "./bedpanel.js";
 import { cropLink, varietyLink, link, openGoalOverview } from "./overview.js";
 import { openGeoSetup } from "./geosetup.js";
 import { openBonitur } from "./bonitur.js";
+import { openGoalEditor, blockGoalOf, moveBlock } from "./goals.js";
 
 const U = 100; // SVG-Einheiten pro Meter, also Zentimeter
 const UPCOMING_DAYS = 21;
@@ -390,6 +391,25 @@ export function mountMap(root) {
     return { start: r.x, len: r.w, offset: r.y, span: r.h < bed.width - 0.001 ? r.h : null };
   }
 
+  // Block einer Satzfolge: gestrichelter Rahmen über ihre Länge, solange die Folge läuft
+  function drawBlock(goal, bed, k) {
+    const ps = state.plantings.filter((p) => p.goal_id === goal.id && p.bed_id === bed.id);
+    if (!ps.length) return null;
+    const from = Math.min(...ps.map((p) => phases(p).fieldStart)), to = Math.max(...ps.map((p) => phases(p).he));
+    if (state.day < from - UPCOMING_DAYS || state.day > to) return null;
+    const crop = find.crop(goal.crop_id);
+    const x = (goal.block_start || 0) * U, w = goal.block_len * U, hh = bed.width * U;
+    const g = s("g", { class: "block", "pointer-events": "none" });
+    g.append(s("rect", { class: "block-outline", x: x + 1.5 * k, y: 1.5 * k, width: Math.max(0, w - 3 * k), height: Math.max(0, hh - 3 * k),
+      stroke: mix(crop?.color || "#6a9b3c", "#1d2b24", 0.35), "vector-effect": "non-scaling-stroke" }));
+    const fs = Math.min(10.5 * k, hh * 0.22);
+    if (w / k > 90 && hh / k > 34) {
+      g.append(s("text", { class: "pl-label block-label", x: x + 5 * k, y: hh - 5 * k, style: `font-size:${fs}px; stroke-width:${3 * k}px` },
+        `Satzfolge ${crop?.name ?? ""}`));
+    }
+    return g;
+  }
+
   function drawGhost(p, bed, k, labelled) {
     const crop = find.crop(p.crop_id);
     const color = crop?.color || "#6a9b3c";
@@ -446,6 +466,12 @@ export function mountMap(root) {
       });
       for (const p of upcoming) pg.append(drawPlanting(p, bed, k, "upcoming"));
       for (const p of active) pg.append(drawPlanting(p, bed, k, "active"));
+      for (const goal of state.goals || []) {
+        if (goal.bed_id === bed.id && goal.block_len > 0) {
+          const block = drawBlock(goal, bed, k);
+          if (block) pg.append(block);
+        }
+      }
       g.append(pg);
       // Warnzeichen und Griffe liegen außerhalb der Beschneidung
       for (const p of active) {
@@ -453,7 +479,8 @@ export function mountMap(root) {
         if (flags) g.append(flags);
       }
       const selP = state.sel?.type === "planting" ? mine.find((p) => p.id === state.sel.id) : null;
-      if (selP && (onBedAt(selP, state.day) || upcoming.includes(selP))) g.append(plantingHandles(selP, bed, k));
+      // Sätze im Block einer Satzfolge: Größe bestimmt die Folge, Ziehen verschiebt den ganzen Block
+      if (selP && !blockGoalOf(selP) && (onBedAt(selP, state.day) || upcoming.includes(selP))) g.append(plantingHandles(selP, bed, k));
     }
 
     // Beschriftung
@@ -905,6 +932,15 @@ export function mountMap(root) {
       case "pl-handle": {
         const p = find.planting(g.id);
         const crop = find.crop(p.crop_id);
+        const goal = g.type === "move-pl" ? blockGoalOf(p) : null;
+        if (goal) {
+          // Satz im Block: die ganze Satzfolge rückt mit
+          const dx = round2((p.start || 0) - (g.orig.start || 0));
+          Object.assign(p, g.orig);
+          schedule("svg");
+          await moveBlock(goal, dx);
+          break;
+        }
         await commit("plantings", p, g.orig, ["start", "len", "offset", "span"],
           g.type === "move-pl" ? `${crop?.name ?? "Satz"} verschoben` : `${crop?.name ?? "Satz"} angepasst`);
         break;
@@ -1209,9 +1245,21 @@ export function mountMap(root) {
       actions: [
         h("button", { type: "button", class: "btn btn-sm btn-primary", onclick: () => openBedEditor(bed), title: "Name, Größe, Lage und Notizen ändern" }, icon("edit"), "Bearbeiten"),
         h("button", { type: "button", class: "btn btn-sm", onclick: () => patch("beds", bed.id, { rotation: ((bed.rotation || 0) + 90) % 360 }, { undoLabel: `${bed.name} gedreht` }) }, icon("rotate"), "90° drehen"),
+        PLANTABLE.has(bed.kind) ? h("button", { type: "button", class: "btn btn-sm", title: "Folgesätze aus der Erntemenge je Woche, als Block auf diesem Beet",
+          onclick: () => openGoalEditor(null, { year: yearOf(state.day), bed_id: bed.id }) }, "Satzweise anbauen") : null,
         h("button", { type: "button", class: "btn btn-sm btn-danger", onclick: deleteSelected }, icon("trash"), "Löschen"),
       ],
     })];
+    const series = (state.goals || []).filter((x) => x.bed_id === bed.id);
+    if (series.length) {
+      out.push(h("section", { class: "panel-section" }, h("h3", {}, "Satzweiser Anbau"),
+        h("ul", { class: "plain-list" }, series.map((x) => {
+          const c = find.crop(x.crop_id);
+          return h("li", {}, h("span", { class: "dot", style: { background: c?.color } }), " ",
+            link(`${c?.name ?? "Kultur"}${x.variety ? ` ${x.variety}` : ""}`, () => openGoalOverview(x)),
+            h("span", { class: "muted small" }, ` · ${fmtNum(x.amount)} ${x.unit} je Woche, ${fmtNum(x.block_len || 0, 2)} m ab ${fmtNum(x.block_start || 0, 2)} m`));
+        }))));
+    }
     out.push(...bedUsage(bed, { onPlanting: (p) => select({ type: "planting", id: p.id }) }));
     if (PLANTABLE.has(bed.kind)) out.push(cropSection(bed));
     return out;
@@ -1261,8 +1309,9 @@ export function mountMap(root) {
       issues.length ? h("ul", { class: "issues" }, issues.map((i) => h("li", { class: i.kind }, i.text))) : null,
       kv,
       p.notes ? h("p", { class: "small", style: { margin: 0, whiteSpace: "pre-wrap" } }, p.notes) : null,
-      series && goal ? h("p", { class: "small", style: { margin: 0 } }, `Satz ${series.pos + 1} von ${series.total} im Ernteziel `,
-        link(`${fmtNum(goal.amount)} ${goal.unit} je Woche`, () => openGoalOverview(goal))) : null,
+      series && goal ? h("p", { class: "small", style: { margin: 0 } }, `Satz ${series.pos + 1} von ${series.total} im satzweisen Anbau `,
+        link(`${fmtNum(goal.amount)} ${goal.unit} je Woche`, () => openGoalOverview(goal)),
+        blockGoalOf(p) ? ". Er liegt im Block der Folge: Ziehen verschiebt die ganze Folge, Größe und Lage ändert die Folge." : null) : null,
       bed ? null : h("div", {},
         h("button", { type: "button", class: "btn btn-sm btn-primary", title: `Springt zum ${ph.plant != null ? "Pflanztag" : "Saattag"}; danach aufs Beet tippen`,
           onclick: () => { setMode({ type: "planting", id: p.id }); setDay(ph.fieldStart); } }, "Auf ein Beet setzen")),

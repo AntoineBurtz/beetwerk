@@ -442,6 +442,7 @@ def delete_bed(bed_id: int):
     with db.session() as conn:
         _get(conn, "beds", bed_id)
         conn.execute("UPDATE plantings SET bed_id = NULL WHERE bed_id = ?", (bed_id,))
+        conn.execute("UPDATE goals SET bed_id = NULL, block_start = NULL, block_len = NULL WHERE bed_id = ?", (bed_id,))
         conn.execute("DELETE FROM beds WHERE id = ?", (bed_id,))
     return Response(status_code=204)
 
@@ -640,6 +641,8 @@ async def import_all(request: Request):
                     _encode_varieties(record)
                 if table == "varieties" and isinstance(record.get("links"), list):
                     record["links"] = json.dumps(record["links"], ensure_ascii=False) if record["links"] else ""
+                if table == "goals" and isinstance(record.get("weeks"), dict):
+                    record["weeks"] = json.dumps(record["weeks"])
                 if table == "varieties" and isinstance(record.get("profile"), dict):
                     record["profile"] = json.dumps(record["profile"], ensure_ascii=False) if record["profile"] else ""
                 conn.execute(
