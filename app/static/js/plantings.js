@@ -10,6 +10,7 @@ import { goalsSection, openGoalEditor } from "./goals.js";
 import { bulkBar, markedPlantings } from "./bulk.js";
 
 let filter = "";
+let listYear = null; // Jahr der Liste „Alle Sätze“: null = Jahr des Stichtags, "all" = alle Jahre
 
 export function mountPlantings(root) {
   const page = h("div", { class: "page" });
@@ -96,12 +97,22 @@ export function mountPlantings(root) {
 
   // ------------------------------------------------------------ Liste
 
-  function listSection(year) {
-    const ys = yearStart(year), len = yearLength(year);
+  function listSection(dayYear) {
+    // Jahre mit Sätzen; die Liste zeigt eins davon oder alle – so bleibt nichts unbemerkt in einem anderen Jahr
+    const counts = new Map();
+    for (const p of state.plantings) {
+      const ph = phases(p);
+      for (let y = yearOf(ph.sow); y <= yearOf(ph.he); y++) counts.set(y, (counts.get(y) || 0) + 1);
+    }
+    if (listYear !== "all" && listYear != null && !counts.has(listYear)) listYear = null;
+    const all = listYear === "all";
+    const year = all ? dayYear : listYear ?? dayYear;
+    const span = all && counts.size ? [Math.min(...counts.keys()), Math.max(...counts.keys())] : [year, year];
+    const ys = yearStart(span[0]), len = yearStart(span[1] + 1) - yearStart(span[0]); // Maßstab der kleinen Zeitleisten
     const q = filter.trim().toLowerCase();
     const rows = state.plantings
       .map((p) => ({ p, ph: phases(p), c: find.crop(p.crop_id), b: find.bed(p.bed_id) }))
-      .filter(({ ph }) => ph.sow < ys + len && ph.he >= ys)
+      .filter(({ ph }) => all || (ph.sow < ys + len && ph.he >= ys))
       .filter(({ p, c, b }) => !q || [c?.name, varietyNames(p), b?.name, c?.family].some((v) => (v || "").toLowerCase().includes(q)))
       .sort((a, b) => a.ph.sow - b.ph.sow);
 
@@ -116,26 +127,32 @@ export function mountPlantings(root) {
         again?.setSelectionRange(pos, pos);
       } });
 
-    const head = h("div", { class: "section-head" }, h("h2", {}, "Alle Sätze"),
+    const years = [...new Set([...counts.keys(), dayYear])].sort((a, b) => a - b);
+    const pick = (v) => { listYear = v === dayYear ? null : v; render(); };
+    const yearSeg = h("div", { class: "seg seg-sm", role: "radiogroup", "aria-label": "Jahr der Liste" },
+      years.map((y) => h("label", {}, h("input", { type: "radio", name: "list-year", checked: !all && y === year, onchange: () => pick(y) }),
+        `${y}${counts.get(y) ? ` (${counts.get(y)})` : ""}`)),
+      h("label", {}, h("input", { type: "radio", name: "list-year", checked: all, onchange: () => pick("all") }), `Alle (${state.plantings.length})`));
+    const head = h("div", { class: "section-head" }, h("h2", {}, "Alle Sätze"), yearSeg,
       h("span", { class: "muted small" }, "Häkchen setzen, um mehrere Sätze gemeinsam zu ändern oder zu löschen"), search);
     if (!rows.length) {
       return h("section", { class: "section" }, head,
-        h("div", { class: "empty-note" }, q ? "Kein Satz passt zum Filter." : `Für ${year} ist noch nichts geplant. Ziehe auf der Karte eine Kultur auf ein Beet oder lege hier einen Satz an.`));
+        h("div", { class: "empty-note" }, q ? "Kein Satz passt zum Filter." : all ? "Es gibt noch keine Sätze." : `Für ${year} ist noch nichts geplant. Ziehe auf der Karte eine Kultur auf ein Beet oder lege hier einen Satz an.`));
     }
 
     const pct = (d) => clamp(((d - ys) / len) * 100, 0, 100);
     // Markieren zum gemeinsamen Ändern oder Löschen; der Kopf markiert alle gezeigten
     const shown = rows.map(({ p }) => p.id);
     const nMarked = shown.filter((id) => state.marked.has(id)).length;
-    const all = h("input", { type: "checkbox", class: "mark-box", "aria-label": "Alle gezeigten Sätze markieren",
+    const allBox = h("input", { type: "checkbox", class: "mark-box", "aria-label": "Alle gezeigten Sätze markieren",
       checked: nMarked > 0 && nMarked === shown.length, onchange: (e) => mark(shown, e.target.checked) });
-    all.indeterminate = nMarked > 0 && nMarked < shown.length;
+    allBox.indeterminate = nMarked > 0 && nMarked < shown.length;
     const table = h("table", { class: "data" },
       h("thead", {}, h("tr", {},
-        h("th", { class: "mark-cell" }, all),
+        h("th", { class: "mark-cell" }, allBox),
         h("th", {}, "Kultur"), h("th", {}, "Beet"), h("th", {}, "Aussaat"), h("th", {}, "Pflanzung"),
         h("th", {}, "Ernte"), h("th", { class: "r" }, "Fläche"), h("th", { class: "r" }, "Pflanzen"),
-        h("th", { class: "tl-cell" }, String(year)), h("th", {}, h("span", { class: "sr-only" }, "Hinweise")))),
+        h("th", { class: "tl-cell" }, all ? "" : String(year)), h("th", {}, h("span", { class: "sr-only" }, "Hinweise")))),
       h("tbody", {}, rows.map(({ p, ph, c, b }) => {
         const issues = issuesOf(p.id);
         const color = c?.color || "#6a9b3c";

@@ -157,18 +157,23 @@ export async function patchMany(kind, list, { undoLabel } = {}) {
   return done.length;
 }
 
+// Löscht, was geht; was der Server ablehnt (z. B. Sätze mit Boniturwerten), bleibt und kommt in failed zurück
 export async function removeMany(kind, ids, { undoLabel } = {}) {
   const done = [];
+  const failed = [];
   for (const id of ids) {
     const item = state[LIST[kind]].find((x) => x.id === id);
     if (!item) continue;
     try {
-      await remove(kind, id);
+      await remove(kind, id, { silent: true });
       done.push({ type: "delete", kind, item, orphans: [] });
-    } catch { break; }
+    } catch (e) {
+      failed.push({ id, item, message: e.message });
+    }
   }
-  if (undoLabel && done.length) pushUndo({ type: "group", entries: done, label: undoLabel });
-  return done.length;
+  const label = typeof undoLabel === "function" ? undoLabel(done.length) : undoLabel;
+  if (label && done.length) pushUndo({ type: "group", entries: done, label });
+  return { done: done.length, failed };
 }
 
 export async function create(kind, data, { undoLabel } = {}) {
@@ -210,7 +215,7 @@ export async function patch(kind, id, changes, { undoLabel, silent } = {}) {
   }
 }
 
-export async function remove(kind, id, { undoLabel } = {}) {
+export async function remove(kind, id, { undoLabel, silent } = {}) {
   const list = state[LIST[kind]];
   const idx = list.findIndex((x) => x.id === id);
   if (idx < 0) return;
@@ -232,7 +237,7 @@ export async function remove(kind, id, { undoLabel } = {}) {
     emit("data");
     if (undoLabel) pushUndo({ type: "delete", kind, item: gone, orphans, label: undoLabel });
   } catch (e) {
-    toast(e.message, { error: true });
+    if (!silent) toast(e.message, { error: true });
     throw e;
   }
 }

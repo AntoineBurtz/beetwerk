@@ -1,7 +1,7 @@
 // Satzweiser Anbau: „6 Köpfe Salat je Woche von KW 20 bis 43, im Urlaub nichts“ – Beetwerk plant die Folgesätze
 // und legt sie als Block auf ein Beet. Ein neuer Satz kommt auf den Streifen, den ein abgeernteter gerade frei
 // gemacht hat; so braucht die Folge so wenig Beet wie möglich. Bearbeitet wird die Folge, die Sätze ziehen mit.
-import { state, api, find, load } from "./store.js";
+import { state, api, find, load, setDay, select } from "./store.js";
 import {
   h, s, fmtDay, dayNum, isoOf, isoWeek, plural, fmtNum, phases, yearOf, monthStarts, MONTHS_SHORT, mix, clamp, round2,
 } from "./util.js";
@@ -64,6 +64,21 @@ export async function moveBlock(g, dx) {
     } catch (e) { toast(e.message, { error: true }); }
   };
   await go(to, `Satzfolge liegt jetzt ab ${m(to)}`, true);
+}
+
+// Auf der Karte zeigen: Stichtag auf den Tag, an dem die meisten Sätze der Folge im Beet stehen, Beet gewählt
+export function showGoalOnMap(g) {
+  const ps = goalPlantings(g).filter((p) => g.bed_id == null || p.bed_id === g.bed_id);
+  if (!ps.length) return;
+  const phs = ps.map(phases);
+  let best = phs[0].fieldStart, most = 0;
+  for (const d of phs.map((x) => x.fieldStart).sort((a, b) => a - b)) {
+    const n = phs.filter((x) => x.fieldStart <= d && d <= x.he).length;
+    if (n > most) { most = n; best = d; }
+  }
+  setDay(best);
+  select(g.bed_id != null ? { type: "bed", id: g.bed_id } : null);
+  location.hash = "karte";
 }
 
 // Sätze einer Folge für den Beetplan, aus den gespeicherten Sätzen
@@ -164,7 +179,9 @@ export function goalsSection(year) {
 
 export function openGoalEditor(goal, { year, bed_id = null, crop_id = null, start = null, focus = null } = {}) {
   const isNew = !goal?.id;
-  const y = year ?? yearOf(state.day);
+  let y = year ?? yearOf(state.day);
+  // Im Herbst plant man das nächste Jahr: liegt die übliche Erntezeit schon hinter dem Stichtag, eins weiter
+  if (isNew && !start && dayNum(`${y}-08-31`) < state.day) y += 1;
   const g = { crop_id, variety: "", start_date: start ?? `${y}-05-15`, end_date: `${y}-09-30`, amount: 4, unit: "Köpfe",
     yield_per_plant: 1, window_days: null, interval_days: null, seasonal: 1, notes: "", bed_id, block_start: null,
     gap_days: 0, weeks: {}, ...goal };
@@ -226,7 +243,7 @@ export function openGoalEditor(goal, { year, bed_id = null, crop_id = null, star
     let best = null;
     for (const b of state.beds) {
       const f = fits.get(b.id);
-      if (!f) continue;
+      if (!f || f.unplaced) continue; // nur Beete, auf die die ganze Folge passt
       const score = [f.unplaced, f.rotation ? 1 : 0, round2(f.block_len * b.width), b.sort];
       if (!best || lexLess(score, best.score)) best = { id: b.id, score };
     }
@@ -339,9 +356,11 @@ export function openGoalEditor(goal, { year, bed_id = null, crop_id = null, star
     });
     const area = bed && out.block_len ? out.block_len * bed.width : 0;
     blockInfo.replaceChildren(...[
+      !bed && fits.size && !bestBed() ? h("p", { class: "note-inline" },
+        "Auf keinem Beet ist in dieser Zeit genug Platz für die ganze Folge. Wähle trotzdem ein Beet – was nicht passt, wartet dann unter „Ohne Beet“ – oder plane weniger Menge.") : null,
       bed ? h("p", { class: out.unplaced ? "note-inline" : "goal-sum" },
         out.unplaced
-          ? `${plural(out.unplaced, "Satz passt", "Sätze passen")} nicht mehr in ${bed.name} – weniger Menge, eine andere Stelle oder ein anderes Beet wählen.`
+          ? `${plural(out.unplaced, "Satz passt", "Sätze passen")} nicht in ${bed.name} und ${out.unplaced === 1 ? "bleibt" : "bleiben"} ohne Beet – weniger Menge, eine andere Stelle oder ein anderes Beet wählen.`
           : [h("strong", {}, `${bed.name}: ${m(out.block_len)} ab ${m(out.block_start)}`),
             ` (${fmtNum(area, 1)} m²) für alle ${plural(ok.length, "Satz", "Sätze")} – ein neuer Satz kommt auf einen Streifen, der gerade abgeerntet ist.`])
         : h("p", { class: "muted small", style: { margin: 0 } }, "Ohne Beet stehen die Sätze unter „Ohne Beet“; auf der Karte legst du sie einzeln ab."),
@@ -368,7 +387,7 @@ export function openGoalEditor(goal, { year, bed_id = null, crop_id = null, star
           h("td", { class: "nowrap" }, `${day(x.harvest_start)} bis ${day(x.harvest_end)}`),
           h("td", { class: "r nowrap" }, `${fmtNum(x.demand)} ${unit.value.trim() || ""}`),
           h("td", { class: "r" }, x.too_cold ? "–" : x.count),
-          bed ? h("td", { class: "r nowrap" }, x.too_cold ? "–" : x.start == null ? "begonnen" : `${m(x.len)} ab ${fmtNum(x.start, 2)}${x.unplaced ? " ⚠" : ""}`) : null))))),
+          bed ? h("td", { class: "r nowrap" }, x.too_cold ? "–" : x.unplaced ? "kein Platz" : x.start == null ? "begonnen" : `${m(x.len)} ab ${fmtNum(x.start, 2)}`) : null))))),
     ].filter(Boolean));
   }
 
@@ -403,8 +422,11 @@ export function openGoalEditor(goal, { year, bed_id = null, crop_id = null, star
       if (res.removed.length) parts.push(`${res.removed.length} entfernt`);
       if (res.kept.length) parts.push(`${res.kept.length} schon begonnen, unverändert`);
       const bed = find.bed(res.goal.bed_id);
+      const saved = (state.goals || []).find((x) => x.id === res.goal.id) || res.goal;
+      // Die Karte zeigt den Stichtag – „Auf der Karte zeigen“ springt in die Zeit, in der die Folge im Beet steht
       toast(`${parts.join(", ") || "Nichts geändert"}.${bed ? ` ${bed.name}: ${m(res.goal.block_len || 0)} ab ${m(res.goal.block_start || 0)}.` : ""}`
-        + (res.unplaced ? ` ${plural(res.unplaced, "Satz passt", "Sätze passen")} nicht ganz ins Beet.` : ""));
+        + (res.unplaced ? ` ${plural(res.unplaced, "Satz hat", "Sätze haben")} keinen Platz und ${res.unplaced === 1 ? "wartet" : "warten"} unter „Ohne Beet“.` : ""),
+        { action: "Auf der Karte zeigen", onAction: () => showGoalOnMap(saved), ms: 9000 });
     },
   });
   ui.dlg.classList.add("goal-dialog");

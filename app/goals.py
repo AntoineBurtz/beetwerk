@@ -287,12 +287,14 @@ def _pack(items: list[dict], bed: dict, start: float, fixed: list[tuple], gap: i
                 x_at = x
                 break
         if x_at is None:
+            # kein Platz in seiner Zeit: der Satz bleibt ohne Beet, statt etwas anderes zu überdecken
             unplaced.append(it["seq"])
-            x_at = start
+            pos[it["seq"]] = None
+            continue
         x_at = round(x_at, 2)
         pos[it["seq"]] = x_at
         placed.append((x_at, x_at + ln, t0, t1))
-    ends = [pos[it["seq"]] + it["len"] for it in items]
+    ends = [pos[it["seq"]] + it["len"] for it in items if pos.get(it["seq"]) is not None]
     return {"pos": pos, "unplaced": unplaced, "block_start": round(start, 2),
             "block_len": round(max(ends) - start, 2) if ends else 0.0}
 
@@ -384,8 +386,10 @@ def apply(conn, goal: dict, fd) -> dict:
                   "sow_date": s["sow_date"], "plant_date": s["plant_date"], "harvest_start": s["harvest_start"],
                   "harvest_end": s["harvest_end"], "rows": s["rows"], "len": s["len"], "span": s["span"],
                   "row_spacing": None, "plant_spacing": None, "varieties": ""}
-        if bed:
+        if bed and s.get("start") is not None:
             values.update(bed_id=bed["id"], start=s["start"], offset=0)
+        elif bed:
+            values.update(bed_id=None, start=0, offset=0)  # passt nicht ins Beet: wartet unter „Ohne Beet“
         if p is None:
             record = {"bed_id": None, "start": 0, "offset": 0, **values, "goal_id": goal["id"], "goal_seq": s["seq"],
                       "notes": ""}
