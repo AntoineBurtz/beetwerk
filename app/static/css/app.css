@@ -233,6 +233,10 @@ h3 { font-size: 15px; }
   font-size: 14px; white-space: nowrap;
 }
 .map-hint .btn { min-height: 28px; background: transparent; color: #fff; border-color: rgba(255,255,255,.35); }
+.bed-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.bed-width-row { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.bed-width-row[hidden] { display: none; }
+.empty-bedmode { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--surface-2); }
 .map-hint .hint-sub { display: block; font-size: 12.5px; opacity: .8; margin-top: 1px; }
 .map-svg .ghost-area { fill-opacity: .32; }
 .map-svg.placing .ghost-area { fill-opacity: .55; stroke: #fff; }
@@ -452,6 +456,12 @@ h3 { font-size: 15px; }
   border-radius: var(--r-m); box-shadow: var(--shadow);
 }
 .tl-selbar[hidden] { display: none; }
+.tl-selbar.multi { border-color: var(--ink); }
+/* Leiste für markierte Sätze unter „Sätze“: klebt unten im Bild */
+.tl-selbar.bulkbar { position: sticky; left: auto; bottom: 16px; transform: none; margin: 16px auto 0; }
+table.data .mark-cell { width: 34px; padding-right: 0; cursor: default; }
+.mark-box { width: 18px; height: 18px; margin: 0; accent-color: var(--ink); vertical-align: middle; cursor: pointer; }
+table.data tr.marked td { background: var(--leaf-soft); }
 .tl-selbar .dot { flex: none; }
 .tl-selbar-text { display: grid; min-width: 0; line-height: 1.3; margin-right: 4px; }
 .tl-selbar-text > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

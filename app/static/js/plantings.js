@@ -1,5 +1,5 @@
 // Sätze: Aufgaben rund um den Stichtag, alle Sätze des Jahres und der Bedarf an Pflanzen.
-import { state, find, patch, select, issuesOf } from "./store.js";
+import { state, find, patch, select, issuesOf, mark } from "./store.js";
 import {
   h, phases, fmtDay, fmtNum, yearOf, yearStart, yearLength, mix, clamp, spanOf, plantCount, rowCount, area,
   isMixed, mixPlan, varietyText, varietyNames,
@@ -7,6 +7,7 @@ import {
 import { openPlantingEditor } from "./editor.js";
 import { openPlantingOverview } from "./overview.js";
 import { goalsSection, openGoalEditor } from "./goals.js";
+import { bulkBar, markedPlantings } from "./bulk.js";
 
 let filter = "";
 
@@ -25,7 +26,8 @@ export function mountPlantings(root) {
       tasksSection(),
       goalsSection(year),
       listSection(year),
-      demandSection(year));
+      demandSection(year),
+      state.marked.size ? h("div", { class: "tl-selbar bulkbar multi", role: "status" }, bulkBar(markedPlantings())) : null);
     page.replaceChildren(inner);
     page.scrollTop = keep;
   }
@@ -113,15 +115,23 @@ export function mountPlantings(root) {
         again?.setSelectionRange(pos, pos);
       } });
 
-    const head = h("div", { class: "section-head" }, h("h2", {}, "Alle Sätze"), search);
+    const head = h("div", { class: "section-head" }, h("h2", {}, "Alle Sätze"),
+      h("span", { class: "muted small" }, "Häkchen setzen, um mehrere Sätze gemeinsam zu ändern oder zu löschen"), search);
     if (!rows.length) {
       return h("section", { class: "section" }, head,
         h("div", { class: "empty-note" }, q ? "Kein Satz passt zum Filter." : `Für ${year} ist noch nichts geplant. Ziehe auf der Karte eine Kultur auf ein Beet oder lege hier einen Satz an.`));
     }
 
     const pct = (d) => clamp(((d - ys) / len) * 100, 0, 100);
+    // Markieren zum gemeinsamen Ändern oder Löschen; der Kopf markiert alle gezeigten
+    const shown = rows.map(({ p }) => p.id);
+    const nMarked = shown.filter((id) => state.marked.has(id)).length;
+    const all = h("input", { type: "checkbox", class: "mark-box", "aria-label": "Alle gezeigten Sätze markieren",
+      checked: nMarked > 0 && nMarked === shown.length, onchange: (e) => mark(shown, e.target.checked) });
+    all.indeterminate = nMarked > 0 && nMarked < shown.length;
     const table = h("table", { class: "data" },
       h("thead", {}, h("tr", {},
+        h("th", { class: "mark-cell" }, all),
         h("th", {}, "Kultur"), h("th", {}, "Beet"), h("th", {}, "Aussaat"), h("th", {}, "Pflanzung"),
         h("th", {}, "Ernte"), h("th", { class: "r" }, "Fläche"), h("th", { class: "r" }, "Pflanzen"),
         h("th", { class: "tl-cell" }, String(year)), h("th", {}, h("span", { class: "sr-only" }, "Hinweise")))),
@@ -136,9 +146,14 @@ export function mountPlantings(root) {
         const issueKind = issues.some((i) => i.kind === "conflict") ? "conflict" : issues.length ? "rotation" : null;
         return h("tr", {
           tabindex: "0",
+          class: state.marked.has(p.id) ? "marked" : null,
           onclick: () => { select({ type: "planting", id: p.id }); openPlantingOverview(p); },
           onkeydown: (e) => { if (e.key === "Enter") openPlantingOverview(p); },
         },
+          h("td", { class: "mark-cell", onclick: (e) => e.stopPropagation() },
+            h("input", { type: "checkbox", class: "mark-box", checked: state.marked.has(p.id),
+              "aria-label": `${c?.name ?? "Satz"} ${varietyText(p) || ""} markieren`.replace(/\s+/g, " "),
+              onchange: (e) => mark([p.id], e.target.checked) })),
           h("td", {}, h("div", { class: "crop-cell" }, h("span", { class: "dot", style: { background: color } }),
             h("span", {}, c?.name ?? "Kultur"), varietyText(p)
               ? h("span", { class: "v", title: isMixed(p) ? varietyNames(p) : null }, varietyText(p)) : null)),

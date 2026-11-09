@@ -8,6 +8,7 @@ import {
 import { mixLegend, downloadPlan } from "./mix.js";
 import {
   openPlantingEditor, openBedEditor, createBedRect, placeCrop, followUp, goalSeries, assignPlanting, DEFAULT_BED_SIZE,
+  uniformWidth, bedModeControl, saveBedMode,
 } from "./editor.js";
 import { iconBtn, icon, toast, confirmDialog, replaceKeepingFocus } from "./ui.js";
 import { bedSummary, bedUsage, miniTimeline } from "./bedpanel.js";
@@ -330,10 +331,17 @@ export function mountMap(root) {
   }
 
   function renderEmpty() {
+    // Erste Frage beim Einrichten: sind alle Beete gleich breit?
+    const bedMode = bedModeControl({ onChange: async () => {
+      try { await saveBedMode(bedMode.value()); } catch (e) { toast(e.message, { error: true }); }
+    } });
     empty.replaceChildren(h("div", {},
       h("h2", {}, "Noch keine Beete"),
       h("p", { class: "muted", style: { margin: 0 } },
         "Lege dein erstes Beet an und ziehe es an die richtige Stelle. Größe und Lage stellst du direkt auf der Karte ein."),
+      h("div", { class: "empty-bedmode" },
+        h("span", { class: "small" }, "Deine Beete"), bedMode.el,
+        h("span", { class: "muted small" }, "Bei gleicher Breite bekommt jedes Beet diese Breite, und die Pflanzreihen laufen entlang der langen Seite. Später änderbar unter Einstellungen.")),
       h("div", { class: "row" },
         state.geo ? null : h("button", { type: "button", class: "btn btn-primary", onclick: openGeoSetup }, icon("parcel"), "Grundstück auf dem Luftbild festlegen"),
         h("button", { type: "button", class: state.geo ? "btn btn-primary" : "btn", onclick: () => setMode({ type: "bed", kind: "bed" }) }, "Beet anlegen"),
@@ -462,7 +470,7 @@ export function mountMap(root) {
       const label = s("text", { class: "bed-name", x: 0, y: -gap, style: `font-size:${fs}px; stroke-width:${Math.min(3 * k, 9)}px`,
         transform: flip ? `rotate(180 ${L / 2} ${Wd / 2}) translate(0 ${Wd + gap + fs})` : null },
         bed.name,
-        showSize ? s("tspan", { class: "bed-size", dx: 6 * k, style: `font-size:${fs * 0.85}px` }, `${fmtNum(bed.length)} × ${fmtNum(bed.width)} m`) : null);
+        showSize ? s("tspan", { class: "bed-size", dx: 6 * k, style: `font-size:${fs * 0.85}px` }, `${fmtNum(bed.length, 2)} × ${fmtNum(bed.width, 2)} m`) : null);
       g.append(label);
     }
 
@@ -472,8 +480,11 @@ export function mountMap(root) {
       g.append(s("line", { x1: L / 2, y1: 0, x2: L / 2, y2: -30 * k, stroke: "var(--ink)", "stroke-width": 1.2, "vector-effect": "non-scaling-stroke" }));
       g.append(handle("bed-rot", L / 2, -30 * k, k, "circle"));
       g.append(handle("bed-r", L, Wd / 2, k));
-      g.append(handle("bed-b", L / 2, Wd, k));
-      g.append(handle("bed-br", L, Wd, k));
+      // Gleiche Beetbreite: nur die Länge lässt sich ziehen
+      if (!uniformWidth(bed.kind)) {
+        g.append(handle("bed-b", L / 2, Wd, k));
+        g.append(handle("bed-br", L, Wd, k));
+      }
     }
     return g;
   }
@@ -742,7 +753,7 @@ export function mountMap(root) {
 
     switch (gesture.type) {
       case "draw": {
-        const r = drawRect(gesture.w0, toWorld(e));
+        const r = fitDraft(drawRect(gesture.w0, toWorld(e)), gesture.kind);
         showDraft(r);
         break;
       }
@@ -868,7 +879,7 @@ export function mountMap(root) {
     switch (g.type) {
       case "draw": {
         hideDraft();
-        const r = drawRect(g.w0, toWorld(e));
+        const r = fitDraft(drawRect(g.w0, toWorld(e)), g.kind);
         if (r.w < 0.2 || r.h < 0.2) { toast("Zu klein: mindestens 20 × 20 cm aufziehen"); break; }
         if (r.h > r.w) {
           // Hochkant aufgezogen: als Beet mit der langen Seite als Länge anlegen und um 90° drehen
@@ -918,6 +929,15 @@ export function mountMap(root) {
   }
 
   // Rechteck zum Aufziehen neuer Flächen, auf 10 cm gerastet, in Metern
+  // Gleiche Beetbreite: die kurze Seite des aufgezogenen Rechtecks ist immer die Beetbreite
+  function fitDraft(r, kind) {
+    const uw = uniformWidth(kind);
+    if (!uw) return r;
+    return r.w >= r.h
+      ? { ...r, y: round2(r.y + r.h / 2 - uw / 2), h: uw, w: Math.max(r.w, 0.3) }
+      : { ...r, x: round2(r.x + r.w / 2 - uw / 2), w: uw, h: Math.max(r.h, 0.3) };
+  }
+
   function drawRect(a, b) {
     const x0 = snap(Math.min(a.x, b.x) / U, 0.1), x1 = snap(Math.max(a.x, b.x) / U, 0.1);
     const y0 = snap(Math.min(a.y, b.y) / U, 0.1), y1 = snap(Math.max(a.y, b.y) / U, 0.1);

@@ -231,7 +231,7 @@ export function openCropOverview(crop0) {
 export function bedFacts(b) {
   return facts([
     ["Art", KIND_LABEL[b.kind]],
-    ["Größe", `${fmtNum(b.length)} × ${fmtNum(b.width)} m · ${fmtNum(b.length * b.width)} m²`],
+    ["Größe", `${fmtNum(b.length, 2)} × ${fmtNum(b.width, 2)} m · ${fmtNum(b.length * b.width)} m²`],
     b.rotation ? ["Drehung", `${Math.round(b.rotation)}°`] : null,
   ].filter(Boolean));
 }

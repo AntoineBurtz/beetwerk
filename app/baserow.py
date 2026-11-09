@@ -688,8 +688,9 @@ def variety_payload(v: dict, crop_bid: Optional[int], rows: list[dict]) -> dict:
     }
 
 
-def plant_count(p: dict, crop: dict, bed: Optional[dict]) -> int:
-    """Wie util.js plantLayout: Reihen entlang der längeren Seite, Plätze je Reihe."""
+def plant_count(p: dict, crop: dict, bed: Optional[dict], uniform: bool = False) -> int:
+    """Wie util.js plantLayout: Reihen entlang der längeren Seite der Fläche, Plätze je Reihe.
+    Sind alle Beete gleich breit (uniform), laufen die Reihen in Beeten immer entlang der langen Beetseite."""
     if p.get("varieties"):
         mixed = bonitur._loads(p["varieties"], []) or []
         if mixed:
@@ -698,12 +699,16 @@ def plant_count(p: dict, crop: dict, bed: Optional[dict]) -> int:
     plant_sp = p["plant_spacing"] or crop["plant_spacing"] or 30
     span = p["span"] if p["span"] is not None else (max(0.05, bed["width"] - (p["offset"] or 0)) if bed else 1)
     long_m, short_m = max(p["len"], span), min(p["len"], span)
+    if uniform and (bed is None or bed["kind"] == "bed"):
+        crosswise = bed is not None and bed["length"] < bed["width"]
+        long_m, short_m = (span, p["len"]) if crosswise else (p["len"], span)
     rows = p["rows"] or max(1, int((short_m * 100 + 0.5) // row_sp))
     per_row = max(1, int((long_m * 100 + 0.5) // plant_sp))
     return rows * per_row
 
 
-def planting_payload(p: dict, crop: dict, bed: Optional[dict], crop_bid: Optional[int], variety_bids: list[int]) -> dict:
+def planting_payload(p: dict, crop: dict, bed: Optional[dict], crop_bid: Optional[int], variety_bids: list[int],
+                     uniform: bool = False) -> dict:
     mixed = bonitur._loads(p["varieties"], []) or []
     names = ", ".join(f"{v.get('name')} ({v.get('count')})" for v in mixed) if mixed else p["variety"]
     start = p["plant_date"] or p["sow_date"]
@@ -714,7 +719,7 @@ def planting_payload(p: dict, crop: dict, bed: Optional[dict], crop_bid: Optiona
         "Sorten": variety_bids, "Sorten (Text)": names, "Beet": bed["name"] if bed else "",
         "Anbau": METHOD_TEXT.get(p["method"], p["method"]), "Jahr": int(start[:4]), "Aussaat": p["sow_date"],
         "Pflanzung": p["plant_date"], "Ernte ab": p["harvest_start"], "Ernte bis": p["harvest_end"],
-        "Pflanzen": plant_count(p, crop, bed), "Fläche (m²)": round(p["len"] * span, 2), "Notizen": p["notes"],
+        "Pflanzen": plant_count(p, crop, bed, uniform), "Fläche (m²)": round(p["len"] * span, 2), "Notizen": p["notes"],
         "Beetwerk-ID": p["id"],
     }
 
@@ -880,6 +885,7 @@ def _run(client: Client, cfg: dict, result: dict) -> None:
         varieties = db.rows(conn, "SELECT * FROM varieties ORDER BY name")
         plantings = db.rows(conn, "SELECT * FROM plantings ORDER BY sow_date, id")
         beds = {b["id"]: b for b in db.rows(conn, "SELECT * FROM beds")}
+        uniform = db.uniform_width(conn) is not None
         traits = db.rows(conn, "SELECT * FROM traits ORDER BY sort, id")
         plants = db.rows(conn, "SELECT * FROM plants ORDER BY planting_id, num")
         obs = db.rows(conn, "SELECT * FROM observations ORDER BY date, id")
@@ -924,7 +930,7 @@ def _run(client: Client, cfg: dict, result: dict) -> None:
                      if (pt["crop_id"], n.strip().lower()) in variety_key
                      and variety_key[(pt["crop_id"], n.strip().lower())]["baserow_id"]]
             payload = keep("plantings", planting_payload(pt, crop, beds.get(pt["bed_id"]), crop_bid.get(pt["crop_id"]),
-                                                         list(dict.fromkeys(vbids))))
+                                                         list(dict.fromkeys(vbids)), uniform))
             h = _hash(payload)
             if not pt["baserow_id"] or pt["bw_hash"] != h:
                 items.append((pt, payload, h))

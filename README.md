@@ -15,6 +15,8 @@ Dazu gibt es:
 - Bedarfsliste je Kultur und Sorte: Fläche, Reihenmeter, Pflanzen, vorzuziehende Jungpflanzen.
 - Kulturenliste mit 36 Gemüsen als Startwerte (Anzucht, Kulturdauer, Abstände, Familie), frei anpassbar.
 - Folgesätze mit einem Klick, Rückgängig (Strg+Z), JSON-Sicherung.
+- Mehrere Sätze markieren und gemeinsam verschieben, ändern oder löschen – in der Zeitleiste und in der Liste unter „Sätze“.
+- Gleich breite Beete: Beim Einrichten wählst du, ob alle Beete dieselbe Breite haben; dann steht die Breite fest und die Pflanzreihen laufen immer entlang der langen Beetseite.
 - Grundstück auf dem Luftbild: Grenze einzeichnen, Beete liegen am echten Ort, Luftbild hinter den Beeten ein- und ausblenden.
 - Wetterband in der Zeitleiste: Regen, Frost und Wasserbilanz mit empfohlenen Gießtagen (Daten von Open-Meteo).
 - Wetter-Seite mit Diagrammen und Monatstabelle, jeweils im Vergleich zum Mittel der letzten 20 Jahre.
@@ -247,6 +249,15 @@ docker compose up -d
 
 Danach im Browser `http://<server>:8000` öffnen. Beim ersten Start ist der Garten leer; unter **Einstellungen** (Regler-Symbol oben rechts) oder im leeren Garten selbst lässt sich ein Beispielgarten laden.
 
+Im leeren Garten fragt Beetwerk außerdem, ob **alle Beete gleich breit** sind (mit Breite, z. B. 1,20 m) oder jedes Beet eigene Maße hat. Bei gleicher Breite:
+
+- bekommt jedes neue Beet diese Breite; auf der Karte ziehst du nur noch die Länge, und ein hochkant aufgezogenes Beet wird gedreht;
+- laufen die Pflanzreihen immer entlang der langen Beetseite – die Pflanzenzahl rechnet sich aus Länge × Reihen über die Beetbreite;
+- sind Sätze aus Erntezielen Streifen über die ganze Beetbreite;
+- gilt das für Flächen der Art „Beet“; Hochbeete, Gewächshäuser und Wege behalten eigene Maße.
+
+Umstellen geht jederzeit unter Einstellungen → Beete. Beete mit anderer Breite werden dann nach Rückfrage angeglichen: die Mitte bleibt, quer liegende Beete werden um 90° gedreht, und die Sätze darin ziehen mit.
+
 Die Datenbank ist eine SQLite-Datei (`beetwerk.db` im Datenordner). Für Backups reicht es, diese Datei zu kopieren, oder du lädst unter Einstellungen eine JSON-Sicherung herunter. Die JSON-Sicherung enthält auch Pflanzen und Boniturwerte, aber keine Fotos; die liegen im Datenordner unter `photos/`.
 
 ### Passwortschutz
@@ -283,6 +294,9 @@ BEETWERK_DATA=./data uvicorn app.main:app --host 0.0.0.0 --port 8000
 | Zeitleiste | Balken waagerecht ziehen verschiebt alle Termine, senkrecht in eine andere Zeile wechselt das Beet. Rechte Kante ändert das Ernteende, linke Kante den Aussaattermin. |
 | Zeitleiste | Klick auf eine freie Stelle legt dort einen neuen Satz an; ist gerade etwas markiert, hebt der Klick nur die Markierung auf. Klick in den Kopf setzt den Stichtag. |
 | Zeitleiste | **Erster Klick markiert** einen Satz (oder eine Satzfolge), unten erscheint eine Leiste mit Name, Beet und Stand. **Zweiter Klick** auf denselben Balken – oder „Details“ – öffnet die Übersicht. Esc oder × hebt die Markierung auf. |
+| Zeitleiste | **Mehrere Sätze:** Strg- oder Umschalt-Klick nimmt Sätze dazu oder heraus, bei einer Satzfolge alle ihre Sätze. Auf dem Handy erst einen Satz antippen, dann „Mehrere“ – danach schaltet jedes Antippen. Die Leiste unten zeigt „3 Sätze markiert“ mit **Ändern** und **Löschen**. Einen der markierten Balken ziehen verschiebt alle gemeinsam in der Zeit. |
+| Sätze | Häkchen vor jedem Satz markieren ihn, das Häkchen im Kopf alle gezeigten (passt zum Filter). Die Markierung gilt auch in der Zeitleiste. |
+| Ändern (mehrere) | Termine um Tage verschieben, Beet wechseln (jeder Satz sucht im neuen Beet eine freie Stelle), Sorte (bei gleicher Kultur), Länge, Reihen, gesät/gepflanzt/abgeerntet, Notiz anhängen. Leere Felder bleiben, wie sie sind. Strg+Z macht alles in einem Schritt rückgängig, auch das Löschen. |
 | Zeitleiste | „1 Jahr / 1½ Jahre / 2 Jahre“ legt fest, wie weit die Zeitleiste reicht; sie beginnt immer im Januar des Stichtag-Jahres, der Januar des Folgejahres trägt die Jahreszahl. Wetterband und Frostschattierung laufen über den Jahreswechsel weiter. Die Wahl bleibt gespeichert. |
 | Zeitleiste | Klick auf den Beetnamen links zeigt rechts die Übersicht des Beets (Art, Größe, Notizen, Belegung, Fruchtfolge); „Bearbeiten“ öffnet das Formular. Esc oder × schließt. |
 | Überall | **Erst Übersicht, dann Bearbeiten:** Ein Klick auf eine Kultur, ein Beet, eine Sorte, einen Satz oder eine Anzucht zeigt eine Übersicht zum Lesen; geändert wird erst nach „Bearbeiten“ bzw. „Stand eintragen“. Unterstrichene Namen in einer Übersicht (Kultur, Sorte, Beet, Satz) öffnen deren Übersicht darüber, „Schließen“ oder Esc führt zurück. Nach dem Speichern zeigen offene Übersichten gleich den neuen Stand. |
