@@ -19,6 +19,7 @@ import { openGoalEditor, blockGoalOf, moveBlock } from "./goals.js";
 
 const U = 100; // SVG-Einheiten pro Meter, also Zentimeter
 const UPCOMING_DAYS = 21;
+const PLAN_AHEAD = 400; // so weit voraus zeigt die Karte, was als Nächstes auf einer freien Fläche geplant ist
 const BLOCK_AHEAD = 150; // so viele Tage vor der Satzfolge ist ihr Block auf der Karte schon zu sehen
 
 let view = null; // { x, y, w, h } bleibt beim Wechsel der Ansicht erhalten
@@ -449,6 +450,7 @@ export function mountMap(root) {
         transform: `translate(${4 * k} ${4 * k}) scale(${(L - 8 * k) / L} ${(Wd - 8 * k) / Wd})` }));
     }
 
+    let later = 0; // geplante Sätze, die am Stichtag nicht zu sehen sind, weil auf ihrer Fläche noch etwas steht
     if (PLANTABLE.has(bed.kind)) {
       const clipId = `clip-bed-${bed.id}`;
       g.append(s("clipPath", { id: clipId }, s("rect", { x: 0, y: 0, width: L, height: Wd })));
@@ -461,14 +463,33 @@ export function mountMap(root) {
       const active = mine.filter((p) => onBedAt(p, state.day));
       const past = harvestedOn(bed);
       const overlap = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+      // Geplant: was später als Nächstes auf eine Fläche kommt, die bis dahin frei ist – damit ein Satz,
+      // der für das Frühjahr angelegt wurde, schon jetzt in seinem Beet zu sehen ist. Der gewählte Satz immer.
+      const selId = state.sel?.type === "planting" ? state.sel.id : null;
+      const planned = [];
+      for (const p of mine.map((q) => ({ q, ph: phases(q) })).filter(({ ph }) => ph.fieldStart > state.day + UPCOMING_DAYS)
+        .sort((a, b) => a.ph.fieldStart - b.ph.fieldStart)) {
+        const r = rectOf(p.q, bed);
+        const taken = [...active, ...upcoming, ...planned].some((q) => overlap(r, rectOf(q, bed)) > 0.5 * r.w * r.h);
+        if (p.q.id === selId || (!taken && p.ph.fieldStart <= state.day + PLAN_AHEAD)) planned.push(p.q);
+        else if (p.ph.fieldStart <= state.day + PLAN_AHEAD) later++;
+      }
       past.forEach((p, i) => {
-        // Beschriftung nur, wo nichts Späteres darüber liegt
+        // Beschriftung nur, wo nichts Späteres darüber liegt – weder über der Fläche noch über der Ecke mit der Schrift
         const r = rectOf(p, bed);
-        const covered = [...past.slice(i + 1), ...upcoming, ...active].some((q) => overlap(r, rectOf(q, bed)) > 0.4 * r.w * r.h);
+        const corner = { x: r.x + Math.min(0.05, r.w / 2), y: r.y + Math.min(0.05, r.h / 2) };
+        const covered = [...past.slice(i + 1), ...planned, ...upcoming, ...active].some((q) => {
+          const o = rectOf(q, bed);
+          return overlap(r, o) > 0.4 * r.w * r.h || inside(o, corner);
+        });
         pg.append(drawGhost(p, bed, k, !covered));
       });
+      const above = [...upcoming, ...active].map((q) => rectOf(q, bed));
+      for (const p of planned) if (p.id !== selId) pg.append(drawPlanting(p, bed, k, "planned", above));
       for (const p of upcoming) pg.append(drawPlanting(p, bed, k, "upcoming"));
       for (const p of active) pg.append(drawPlanting(p, bed, k, "active"));
+      // der gewählte geplante Satz liegt obenauf, auch wenn dort gerade noch etwas anderes steht
+      for (const p of planned) if (p.id === selId) pg.append(drawPlanting(p, bed, k, "planned"));
       for (const goal of state.goals || []) {
         if (goal.bed_id === bed.id && goal.block_len > 0) {
           const block = drawBlock(goal, bed, k);
@@ -483,7 +504,7 @@ export function mountMap(root) {
       }
       const selP = state.sel?.type === "planting" ? mine.find((p) => p.id === state.sel.id) : null;
       // Sätze im Block einer Satzfolge: Größe bestimmt die Folge, Ziehen verschiebt den ganzen Block
-      if (selP && !blockGoalOf(selP) && (onBedAt(selP, state.day) || upcoming.includes(selP))) g.append(plantingHandles(selP, bed, k));
+      if (selP && !blockGoalOf(selP) && (onBedAt(selP, state.day) || upcoming.includes(selP) || planned.includes(selP))) g.append(plantingHandles(selP, bed, k));
     }
 
     // Beschriftung
@@ -500,7 +521,9 @@ export function mountMap(root) {
       const label = s("text", { class: "bed-name", x: 0, y: -gap, style: `font-size:${fs}px; stroke-width:${Math.min(3 * k, 9)}px`,
         transform: flip ? `rotate(180 ${L / 2} ${Wd / 2}) translate(0 ${Wd + gap + fs})` : null },
         bed.name,
-        showSize ? s("tspan", { class: "bed-size", dx: 6 * k, style: `font-size:${fs * 0.85}px` }, `${fmtNum(bed.length, 2)} × ${fmtNum(bed.width, 2)} m`) : null);
+        showSize ? s("tspan", { class: "bed-size", dx: 6 * k, style: `font-size:${fs * 0.85}px` }, `${fmtNum(bed.length, 2)} × ${fmtNum(bed.width, 2)} m`) : null,
+        // steht am Stichtag noch etwas anderes auf der Fläche, zeigt die Beschriftung, dass hier später mehr kommt
+        showSize && later ? s("tspan", { class: "bed-later", dx: 6 * k, style: `font-size:${fs * 0.85}px` }, `+${later} später`) : null);
       g.append(label);
     }
 
@@ -528,7 +551,8 @@ export function mountMap(root) {
       s("circle", { class: "handle-hit", cx: x, cy: y, r: 18 * k }), vis);
   }
 
-  function drawPlanting(p, bed, k, mode) {
+  // covers: Flächen (in Metern), die über diesem Satz liegen – die Beschriftung weicht ihnen aus
+  function drawPlanting(p, bed, k, mode, covers = []) {
     const crop = find.crop(p.crop_id);
     const color = crop?.color || "#6a9b3c";
     const r = rectOf(p, bed);
@@ -541,6 +565,12 @@ export function mountMap(root) {
     if (mode === "upcoming") {
       g.append(s("rect", { x, y, width: w, height: hh, fill: "url(#hatch)", stroke: color, "stroke-width": 2,
         "stroke-dasharray": "6 5", "vector-effect": "non-scaling-stroke" }));
+    } else if (mode === "planned") {
+      // geplant, kommt erst später: blasse Fläche in Kulturfarbe mit feiner gestrichelter Linie
+      g.classList.add("planned");
+      if (selected) g.classList.add("on-top");
+      g.append(s("rect", { class: "planned-area", x, y, width: w, height: hh, fill: mix(color, "#ffffff", 0.35), stroke: color,
+        "stroke-width": 1.6, "stroke-dasharray": "2 5", "stroke-linecap": "round", "vector-effect": "non-scaling-stroke" }));
     } else {
       g.append(s("rect", { x, y, width: w, height: hh, fill: mix(color, "#ffffff", 0.58), stroke: mix(color, "#1d2b24", 0.2),
         "stroke-width": 1.2, "vector-effect": "non-scaling-stroke" }));
@@ -562,17 +592,39 @@ export function mountMap(root) {
       const name = crop?.name ?? "Kultur";
       const maxChars = Math.max(2, Math.floor((w - 2 * pad) / (fs * 0.47)));
       const clip = (t) => (t.length > maxChars ? t.slice(0, Math.max(1, maxChars - 1)) + "…" : t);
-      const sub = mode === "upcoming" ? `ab ${fmtDay(phases(p).fieldStart)}` : varietyText(p);
-      const twoLines = sub && screenH >= 32;
-      const t = s("text", { class: "pl-label", x: x + pad, y: y + pad + fs * 0.85,
-        style: `font-size:${fs}px; stroke-width:${3.5 * k}px` }, clip(name));
-      if (sub) {
-        if (twoLines) t.append(s("tspan", { class: "pl-sub", x: x + pad, dy: fs * 1.08, style: `font-size:${fs * 0.88}px` }, clip(sub)));
-        else if (name.length + sub.length + 1 <= maxChars) t.append(s("tspan", { class: "pl-sub", dx: fs * 0.3, style: `font-size:${fs * 0.88}px` }, sub));
+      // zweite Zeile: die Sorte – oder, solange der Satz noch nicht im Beet steht, ab wann er kommt
+      const subMax = Math.max(2, Math.floor((w - 2 * pad) / (fs * 0.88 * 0.47)));
+      const tall = screenH >= 32;
+      const sub = mode === "active" ? varietyText(p)
+        : sinceText(phases(p).fieldStart, tall ? subMax : maxChars - name.length - 1, tall);
+      const twoLines = sub && tall;
+      // liegt oben links etwas anderes darüber, steht die Beschriftung unten – oder entfällt, wenn auch dort kein Platz ist
+      const hidden = (pt) => covers.some((c) => inside(c, pt));
+      const m = Math.min(0.05, r.w / 2, r.h / 2);
+      const bottom = hidden({ x: r.x + m, y: r.y + m });
+      if (!bottom || !hidden({ x: r.x + m, y: r.y + r.h - m })) {
+        const lines = twoLines ? 2 : 1;
+        const base = bottom ? y + hh - pad - fs * 0.25 - (lines - 1) * fs * 1.08 : y + pad + fs * 0.85;
+        const t = s("text", { class: "pl-label", x: x + pad, y: base,
+          style: `font-size:${fs}px; stroke-width:${3.5 * k}px` }, clip(name));
+        if (sub) {
+          if (twoLines) t.append(s("tspan", { class: "pl-sub", x: x + pad, dy: fs * 1.08, style: `font-size:${fs * 0.88}px` },
+            mode === "active" ? clip(sub) : sub));
+          else if (name.length + sub.length + 1 <= maxChars) t.append(s("tspan", { class: "pl-sub", dx: fs * 0.3, style: `font-size:${fs * 0.88}px` }, sub));
+        }
+        g.append(t);
       }
-      g.append(t);
     }
     return g;
+  }
+
+  // Ab wann ein Satz ins Beet kommt, in der längsten Schreibweise, die in max Zeichen passt:
+  // „ab 1. Apr 2027“, „ab 1.4.27“, „ab 1.4.“, „1.4.“ – passt keine, die kürzeste (always) oder nichts
+  function sinceText(day, max, always = false) {
+    const other = yearOf(day) !== yearOf(state.day);
+    const [y, mo, d] = isoOf(day).split("-").map(Number);
+    const forms = [`ab ${fmtDay(day, { year: other })}`, `ab ${d}.${mo}.${other ? String(y).slice(2) : ""}`, `ab ${d}.${mo}.`, `${d}.${mo}.`];
+    return forms.find((f) => f.length <= max) ?? (always ? forms.at(-1) : "");
   }
 
   function drawPlants(p, crop, bed, x, y, w, hh, color, k) {

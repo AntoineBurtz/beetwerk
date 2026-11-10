@@ -207,6 +207,7 @@ h3 { font-size: 15px; }
 .map-svg .bed-body { stroke-width: 2; }
 .map-svg .bed-name { font-family: var(--font-cond); font-weight: 600; fill: var(--ink); pointer-events: none; paint-order: stroke; stroke: rgba(251, 252, 249, .8); stroke-linejoin: round; }
 .map-svg .bed-size { font-weight: 500; fill: var(--ink-3); }
+.map-svg .bed-later { font-weight: 600; fill: var(--leaf); }
 .map-svg .planting { cursor: move; }
 .map-svg .pl-label { font-family: var(--font-cond); font-weight: 600; pointer-events: none; paint-order: stroke; stroke: rgba(251, 252, 249, .85); stroke-width: 4px; stroke-linejoin: round; fill: var(--ink); }
 .map-svg .pl-sub { font-weight: 500; fill: var(--ink-2); }
@@ -239,6 +240,9 @@ h3 { font-size: 15px; }
 .empty-bedmode { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--surface-2); }
 .map-hint .hint-sub { display: block; font-size: 12.5px; opacity: .8; margin-top: 1px; }
 .map-svg .ghost-area { fill-opacity: .32; }
+.map-svg .planned-area { fill-opacity: .42; }
+.map-svg .planting.planned.on-top .planned-area { fill-opacity: .94; }
+.map-svg .planting.planned .pl-label { fill: var(--ink-2); }
 .map-svg.placing .ghost-area { fill-opacity: .55; stroke: #fff; }
 .map-svg .pl-ghost { fill: var(--ink-2); font-weight: 500; }
 

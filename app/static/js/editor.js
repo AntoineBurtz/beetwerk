@@ -397,10 +397,22 @@ export function openPlantingEditor(planting, defaults = {}) {
       if (payload.bed_id == null) {
         toast(`${c.name} angelegt, noch ohne Beet`, {
           action: "Beet zuweisen",
-          onAction: () => { setMode({ type: "planting", id: item.id }); location.hash = "karte"; },
+          // wie beim Antippen in „Sätze ohne Beet“: Stichtag auf den Tag, an dem der Satz ins Beet kommt
+          onAction: () => { setMode({ type: "planting", id: item.id }); setDay(phases(item).fieldStart); location.hash = "karte"; },
         });
       } else {
-        toast(`${c.name} angelegt`);
+        // Die Karte zeigt den Stichtag: von woanders aus führt „Auf der Karte zeigen“ zum Satz in seinem Beet,
+        // an dem Tag, an dem er dorthin kommt
+        const ph = phases(item);
+        const inBedNow = ph.fieldStart <= state.day && state.day <= ph.he;
+        toast(`${c.name} angelegt in ${targetBed?.name ?? "seinem Beet"}`, document.body.dataset.view === "karte" ? {} : {
+          action: "Auf der Karte zeigen", ms: 8000,
+          onAction: () => {
+            if (!inBedNow) setDay(ph.fieldStart);
+            select({ type: "planting", id: item.id });
+            location.hash = "karte";
+          },
+        });
       }
     } else {
       await patch("plantings", p.id, payload, { undoLabel: "Satz gespeichert", silent: true });
@@ -936,9 +948,12 @@ export async function assignPlanting(pid, bed, local = null, spot = null) {
   await patch("plantings", p.id, { bed_id: bed.id, start, len, offset, span },
     { undoLabel: `${crop?.name ?? "Satz"} in ${bed.name} gesetzt` });
   select({ type: "planting", id: p.id });
-  const visible = ph.fieldStart <= state.day + 21 && state.day <= ph.he;
-  if (!visible) {
-    toast(`Auf der Karte zu sehen ab ${fmtDay(ph.fieldStart)}`, { action: "Hinspringen", onAction: () => setDay(ph.fieldStart) });
+  // Später oder früher als der Stichtag: der Satz ist als „geplant“ markiert zu sehen; hinspringen zeigt seine Zeit
+  if (ph.fieldStart > state.day + 21) {
+    toast(`Geplant ab ${fmtDay(ph.fieldStart, { year: yearOf(ph.fieldStart) !== yearOf(state.day) })} – gestrichelt im Beet`,
+      { action: "Hinspringen", onAction: () => setDay(ph.fieldStart) });
+  } else if (state.day > ph.he) {
+    toast(`Der Satz war am ${fmtDay(state.day)} schon abgeerntet`, { action: "Zum Satz springen", onAction: () => setDay(ph.fieldStart) });
   }
   return p;
 }
