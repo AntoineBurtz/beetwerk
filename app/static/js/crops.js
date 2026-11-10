@@ -5,6 +5,7 @@ import { openCropEditor } from "./editor.js";
 import { openCropOverview } from "./overview.js";
 import { varietiesView, forgetProfiles } from "./varieties.js";
 import { replaceKeepingFocus } from "./ui.js";
+import { openReferenceCheck, feedLabel } from "./feedui.js";
 
 let filter = "";
 let tab = (() => { try { return sessionStorage.getItem("beetwerk.cropsTab") || "kulturen"; } catch { return "kulturen"; } })();
@@ -65,7 +66,7 @@ export function mountCrops(root) {
       if (c.family !== lastFamily) {
         lastFamily = c.family;
         rows.push(h("tr", { style: { cursor: "default", background: "var(--surface-2)" } },
-          h("td", { colspan: 8, style: { fontWeight: 600, fontSize: "13px", color: "var(--ink-2)", padding: "5px 10px" } }, c.family || "Ohne Familie")));
+          h("td", { colspan: 9, style: { fontWeight: 600, fontSize: "13px", color: "var(--ink-2)", padding: "5px 10px" } }, c.family || "Ohne Familie")));
       }
       rows.push(h("tr", { tabindex: "0", onclick: () => openCropOverview(c), onkeydown: (e) => { if (e.key === "Enter") openCropOverview(c); } },
         h("td", {}, h("div", { class: "crop-cell" }, h("span", { class: "dot", style: { background: c.color } }), c.name)),
@@ -74,6 +75,7 @@ export function mountCrops(root) {
         h("td", { class: "r" }, `${c.field_days} Tage`),
         h("td", { class: "r" }, `${c.harvest_days} Tage`),
         h("td", { class: "r nowrap" }, `${c.row_spacing} × ${c.plant_spacing} cm`),
+        h("td", {}, feedLabel(c) || h("span", { class: "muted" }, "–")),
         h("td", { class: "r" }, sorts.get(c.id) || h("span", { class: "muted" }, "–")),
         h("td", { class: "r" }, used.get(c.id) || h("span", { class: "muted" }, "–"))));
     }
@@ -83,6 +85,8 @@ export function mountCrops(root) {
         h("h1", {}, "Kulturen"),
         tabs(render),
         search,
+        h("button", { type: "button", class: "btn", title: "Abstände und Düngung mit den Richtwerten aus den Quellen vergleichen",
+          onclick: () => openReferenceCheck() }, "Richtwerte prüfen"),
         h("button", { type: "button", class: "btn btn-primary", onclick: () => openCropEditor(null) }, "Neue Kultur")),
       h("p", { class: "muted", style: { margin: "-14px 0 0", maxWidth: "70ch" } },
         "Antippen zeigt die Übersicht einer Kultur mit ihren Sorten, Sätzen und der Anzucht. Die Tage bestimmen die vorgeschlagenen Termine, wenn du eine Kultur aufs Beet setzt; bis zur Ernte zählt ab Pflanzung, bei Direktsaat ab Aussaat. Die Familie nutzt die Fruchtfolge-Prüfung."),
@@ -90,7 +94,7 @@ export function mountCrops(root) {
         ? h("div", { class: "table-wrap" }, h("table", { class: "data" },
           h("thead", {}, h("tr", {},
             h("th", {}, "Kultur"), h("th", {}, "Anbau"), h("th", { class: "r" }, "Anzucht"), h("th", { class: "r" }, "Bis Ernte"),
-            h("th", { class: "r" }, "Erntedauer"), h("th", { class: "r" }, "Abstände"), h("th", { class: "r" }, "Sorten"), h("th", { class: "r" }, "Sätze"))),
+            h("th", { class: "r" }, "Erntedauer"), h("th", { class: "r" }, "Abstände"), h("th", { title: "Stickstoffbedarf" }, "Düngung"), h("th", { class: "r" }, "Sorten"), h("th", { class: "r" }, "Sätze"))),
           h("tbody", {}, rows)))
         : h("div", { class: "empty-note" }, "Keine Kultur passt zum Filter."));
     page.replaceChildren(inner);

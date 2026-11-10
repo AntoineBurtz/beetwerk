@@ -8,6 +8,8 @@ import { openPlantingEditor } from "./editor.js";
 import { openPlantingOverview } from "./overview.js";
 import { goalsSection, openGoalEditor } from "./goals.js";
 import { bulkBar, markedPlantings } from "./bulk.js";
+import { feedPlan, gramsText, chosenFertilizer } from "./feed.js";
+import { setDone } from "./feedui.js";
 
 let filter = "";
 let listYear = null; // Jahr der Liste „Alle Sätze“: null = Jahr des Stichtags, "all" = alle Jahre
@@ -53,6 +55,13 @@ export function mountPlantings(root) {
       if (ph.plant != null) push(ph.plant, "Auspflanzen", "planted_done");
       push(ph.hs, "Ernte beginnt", null);
       push(ph.he, "Abräumen", "harvest_done");
+      // Düngergaben: offene bleiben stehen, bis sie abgehakt sind oder der Satz abgeräumt ist
+      if (p.bed_id) {
+        for (const item of feedPlan(p, find.crop(p.crop_id), find.bed(p.bed_id), state.settings, state.fertilizers).items) {
+          if (item.day < from || item.day > to || (item.day < day && (item.done || ph.he < day))) continue;
+          tasks.push({ d: item.day, verb: "Düngen", feed: item, done: !!item.done, p });
+        }
+      }
     }
     tasks.sort((a, b) => a.d - b.d || a.verb.localeCompare(b.verb));
     const overdue = tasks.filter((t) => t.d < day);
@@ -81,17 +90,20 @@ export function mountPlantings(root) {
   function taskRow(t, overdue) {
     const c = find.crop(t.p.crop_id);
     const bed = find.bed(t.p.bed_id);
-    const box = t.flag
+    const box = t.flag || t.feed
       ? h("input", { type: "checkbox", checked: t.done, "aria-label": `${t.verb} erledigt`, style: { width: "18px", height: "18px", accentColor: "var(--leaf)" },
-        onchange: (e) => patch("plantings", t.p.id, { [t.flag]: e.target.checked }) })
+        onchange: (e) => (t.feed ? setDone(t.p, t.feed.i, e.target.checked) : patch("plantings", t.p.id, { [t.flag]: e.target.checked })) })
       : h("span", { class: "dot", style: { background: c?.color, margin: "0 3px" } });
-    return h("div", { class: `task${t.done && t.flag ? " done" : ""}${overdue ? " overdue" : ""}` },
+    const amount = t.feed ? (t.feed.grams == null ? `${fmtNum(t.feed.n, 1)} g Stickstoff`
+      : `${gramsText(t.feed.grams)} ${chosenFertilizer(state.settings, state.fertilizers)?.name ?? "Dünger"}`) : null;
+    return h("div", { class: `task${t.done && (t.flag || t.feed) ? " done" : ""}${overdue ? " overdue" : ""}` },
       box,
       h("span", { class: "date num" }, fmtDay(t.d)),
       h("span", { class: "verb" }, t.verb),
       h("span", { class: "what" },
         h("button", { type: "button", style: { all: "unset", cursor: "pointer" }, onclick: () => openPlantingOverview(t.p) },
-          c?.name ?? "Kultur", varietyText(t.p) ? h("span", { class: "muted" }, ` ${varietyText(t.p)}`) : null)),
+          c?.name ?? "Kultur", varietyText(t.p) ? h("span", { class: "muted" }, ` ${varietyText(t.p)}`) : null),
+        amount ? h("span", { class: "muted" }, ` · ${amount}`) : null),
       h("span", { class: "where" }, bed ? `${t.flag === "sown_done" && t.p.method === "transplant" ? "für " : ""}${bed.name}` : "Ohne Beet"));
   }
 

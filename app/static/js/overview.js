@@ -14,6 +14,7 @@ import { cardTraits } from "./profileform.js";
 import { openGoalEditor, goalPlantings, bedPlan, itemsOf, showGoalOnMap } from "./goals.js";
 import { openBonitur } from "./bonitur.js";
 import { mixLegend } from "./mix.js";
+import { feedBlock, feedLabel } from "./feedui.js";
 
 const TRAIT_GROUP = { tomato: "Tomate (UPOV)", pepper: "Paprika und Chili (UPOV)" };
 const STATUS = { wish: "gewünscht", promised: "zugesagt", done: "abgeholt", cancelled: "abgesagt" };
@@ -163,6 +164,8 @@ export function openCropOverview(crop0) {
           : `${c.field_days} Tage bis zur Ernte, ${c.harvest_days} Tage Ernte`],
         ["Abstände", `${c.row_spacing} × ${c.plant_spacing} cm (${fmtNum(10000 / (c.row_spacing * c.plant_spacing))} Pflanzen je m²)`],
         ["Fruchtfolge", c.family ? `${c.family}, ${rotation} Jahre Anbaupause` : "keine Familie angegeben – keine Prüfung"],
+        ["Düngung", c.feed ? (c.feed === "none" ? "kein Stickstoffdünger, Kompost genügt"
+          : `Stickstoffbedarf ${feedLabel(c)}${c.feed_cut ? ", nach den Schnitten nachdüngen" : ""}`) : null],
         ["Bonitur", c.trait_group ? `Merkmale für ${TRAIT_GROUP[c.trait_group]}` : "allgemeine Merkmale"],
       ]);
       const nursery = transplant ? block("Anzucht", h("ul", { class: "calc" },
@@ -322,6 +325,7 @@ export function openPlantingOverview(p0) {
         !isMixed(p) && names.some((n) => varietyOf(p.crop_id, n)) ? h("div", { class: "ov-varieties" },
           names.map((n) => varietyOf(p.crop_id, n)).filter(Boolean).map((v) => varietyCard(v, crop))) : null,
         isMixed(p) ? block("Sorten im Beet", mixLegend(p, crop, bed)) : null,
+        bed ? block("Düngung", feedBlock(p)) : null,
         goal ? h("p", { class: "small", style: { margin: 0 } }, goalSeries(p) ? `Satz ${goalSeries(p).pos + 1} von ${goalSeries(p).total} im Ernteziel ` : "Gehört zum Ernteziel ",
           link(`${fmtNum(goal.amount)} ${goal.unit} je Woche`, () => openGoalOverview(goal)),
           ". Ändert sich das Ziel, passt sich der Satz an, solange er nicht gesät ist.") : null,
