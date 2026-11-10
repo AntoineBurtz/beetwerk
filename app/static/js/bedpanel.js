@@ -22,23 +22,30 @@ export function bedUsage(bed, { onPlanting } = {}) {
   if (!PLANTABLE.has(bed.kind)) return [];
   const year = yearOf(state.day);
   const ys = yearStart(year), ye = ys + yearLength(year) - 1;
-  const thisYear = state.plantings
-    .filter((p) => p.bed_id === bed.id)
-    .filter((p) => { const ph = phases(p); return ph.sow <= ye && ph.he >= ys; })
-    .sort((a, b) => phases(a).fieldStart - phases(b).fieldStart);
+  const mine = state.plantings.filter((p) => p.bed_id === bed.id);
+  const inYear = (y) => {
+    const a = yearStart(y), b = a + yearLength(y) - 1;
+    return mine.filter((p) => { const ph = phases(p); return ph.sow <= b && ph.he >= a; })
+      .sort((p, q) => phases(p).fieldStart - phases(q).fieldStart);
+  };
+  const list = (items, y) => h("div", { class: "bed-timeline" }, items.map((p) => {
+    const c = find.crop(p.crop_id);
+    return h("div", { class: "row" },
+      h("button", { type: "button", onclick: () => onPlanting?.(p), title: `${c?.name ?? ""} ${varietyText(p)}` },
+        c?.name ?? "Kultur", varietyText(p) ? h("span", { class: "muted" }, ` ${varietyText(p)}`) : null),
+      miniTimeline(p, y));
+  }));
+  const thisYear = inYear(year);
+  // Was erst im Folgejahr beginnt, steht darunter: so findet sich im Herbst, was für das Frühjahr geplant ist
+  const nextYear = inYear(year + 1);
+  const fresh = nextYear.some((p) => phases(p).sow > ye);
   return [
     h("section", { class: "panel-section" }, h("h3", {}, `Belegung ${year}`),
-      thisYear.length
-        ? h("div", { class: "bed-timeline" }, thisYear.map((p) => {
-          const c = find.crop(p.crop_id);
-          return h("div", { class: "row" },
-            h("button", { type: "button", onclick: () => onPlanting?.(p), title: `${c?.name ?? ""} ${varietyText(p)}` },
-              c?.name ?? "Kultur", varietyText(p) ? h("span", { class: "muted" }, ` ${varietyText(p)}`) : null),
-            miniTimeline(p, year));
-        }))
-        : h("p", { class: "muted small", style: { margin: 0 } }, "Noch nichts geplant.")),
+      thisYear.length ? list(thisYear, year)
+        : h("p", { class: "muted small", style: { margin: 0 } }, fresh ? `${year} nichts geplant.` : "Noch nichts geplant.")),
+    fresh ? h("section", { class: "panel-section" }, h("h3", {}, `Belegung ${year + 1}`), list(nextYear, year + 1)) : null,
     h("section", { class: "panel-section" }, h("h3", {}, "Fruchtfolge"), rotationHistory(bed, year)),
-  ];
+  ].filter(Boolean);
 }
 
 export function rotationHistory(bed, year) {
