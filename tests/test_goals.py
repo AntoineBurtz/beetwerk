@@ -234,12 +234,12 @@ def test_block_reuses_harvested_strips(client):
 def test_strip_is_at_least_one_spacing_long():
     crop = {"row_spacing": 30, "plant_spacing": 30}
     bed = {"kind": "bed", "length": 6.0, "width": 1.2}
-    # vier Köpfe: eine Reihe quer über das Beet braucht ihren Reihenabstand, nicht nur 5 cm
-    assert goals._strip(4, crop, bed, False) == {"rows": None, "len": 0.3, "span": None, "count": 4}
-    assert goals._strip(12, crop, bed, False)["len"] == 0.9
-    # gleich breite Beete: Reihen längs, vier nebeneinander über die Breite
-    assert goals._strip(4, crop, bed, True) == {"rows": None, "len": 0.3, "span": None, "count": 4}
-    assert goals._strip(5, crop, bed, True)["len"] == 0.6
+    # vier Köpfe: vier Reihen längs im Beet mit je einer Pflanze – der Streifen braucht einen Pflanzabstand, nicht nur 5 cm
+    assert goals._strip(4, crop, bed) == {"rows": None, "len": 0.3, "span": None, "count": 4}
+    assert goals._strip(12, crop, bed)["len"] == 0.9
+    assert goals._strip(5, crop, bed)["len"] == 0.6
+    # Beet breiter als lang: die Reihen laufen entlang der Breite, der Streifen braucht einen Reihenabstand
+    assert goals._strip(4, {"row_spacing": 40, "plant_spacing": 30}, {"kind": "bed", "length": 1.2, "width": 6.0})["len"] == 0.4
 
 
 def test_satz_without_room_waits_without_bed(client):

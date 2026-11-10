@@ -858,8 +858,8 @@ export function openSettings() {
       bedMode.el,
       h("p", { class: "muted small", style: { margin: 0 } },
         "Gleich breite Beete: Jedes neue Beet bekommt diese Breite, auf der Karte änderst du nur noch die Länge. "
-        + "Die Pflanzreihen laufen immer entlang der langen Seite, und Sätze aus Erntezielen sind Streifen über die ganze Beetbreite. "
-        + "Gilt für Flächen der Art „Beet“; Hochbeete, Gewächshäuser und Wege behalten eigene Maße.")),
+        + "Gilt für Flächen der Art „Beet“; Hochbeete, Gewächshäuser und Wege behalten eigene Maße. "
+        + "Die Pflanzreihen laufen in jedem Beet entlang der langen Seite, nie quer.")),
     weatherSection,
     field("Anbaupause für die Fruchtfolge (Jahre)", years,
       "Gleiche Pflanzenfamilie an gleicher Stelle innerhalb dieser Zeit wird markiert. 0 schaltet die Prüfung ab."),
@@ -948,9 +948,9 @@ export async function assignPlanting(pid, bed, local = null, spot = null) {
   await patch("plantings", p.id, { bed_id: bed.id, start, len, offset, span },
     { undoLabel: `${crop?.name ?? "Satz"} in ${bed.name} gesetzt` });
   select({ type: "planting", id: p.id });
-  // Später oder früher als der Stichtag: der Satz ist als „geplant“ markiert zu sehen; hinspringen zeigt seine Zeit
-  if (ph.fieldStart > state.day + 21) {
-    toast(`Geplant ab ${fmtDay(ph.fieldStart, { year: yearOf(ph.fieldStart) !== yearOf(state.day) })} – gestrichelt im Beet`,
+  // Später oder früher als der Stichtag: die Fläche ist als „geplant“ abgesteckt zu sehen; hinspringen zeigt den Satz im Beet
+  if (ph.fieldStart > state.day) {
+    toast(`Geplant ab ${fmtDay(ph.fieldStart, { year: yearOf(ph.fieldStart) !== yearOf(state.day) })} – die Fläche ist im Beet abgesteckt`,
       { action: "Hinspringen", onAction: () => setDay(ph.fieldStart) });
   } else if (state.day > ph.he) {
     toast(`Der Satz war am ${fmtDay(state.day)} schon abgeerntet`, { action: "Zum Satz springen", onAction: () => setDay(ph.fieldStart) });

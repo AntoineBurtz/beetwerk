@@ -190,6 +190,7 @@ class SettingsIn(BaseModel):
     weather_lon: Optional[float] = Field(None, ge=-180, le=180)
     bed_mode: Optional[Literal["uniform", "individual"]] = None
     bed_width: Optional[float] = Field(None, ge=0.2, le=10)
+    beds_locked: Optional[Literal["0", "1"]] = None
 
 
 class CustomSource(BaseModel):
