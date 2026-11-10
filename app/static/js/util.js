@@ -114,20 +114,14 @@ export function spacing(p, crop) {
   };
 }
 
-// Regeln aus den Einstellungen, die store.js bei jeder Datenänderung setzt
-export const rules = {
-  uniformBeds: false, // alle Beete gleich breit: Reihen laufen in Beeten immer entlang der langen Beetseite
-};
-
-// Pflanzbild: Reihen laufen entlang der längeren Seite der Fläche – bei gleich breiten Beeten
-// entlang der langen Seite des Beets (auch für Sätze, die noch kein Beet haben).
-// along = "x": Reihen waagrecht (entlang der Länge), sonst senkrecht.
+// Pflanzbild: Reihen laufen immer in Beetrichtung, also entlang der langen Beetseite – nie quer,
+// auch wenn der Satz selbst breiter als lang ist. Ohne Beet entlang der Länge des Satzes.
+// along = "x": Reihen entlang der Beetlänge, sonst entlang der Beetbreite (Beet breiter als lang).
 export function plantLayout(p, crop, bed) {
   const sp = spacing(p, crop);
   const lenM = p.len;
   const spanM = spanOf(p, bed);
-  const alongBed = rules.uniformBeds && (!bed || bed.kind === "bed");
-  const along = alongBed ? (bed && bed.length < bed.width ? "y" : "x") : lenM >= spanM ? "x" : "y";
+  const along = bed && bed.length < bed.width ? "y" : "x";
   const longM = along === "x" ? lenM : spanM;
   const shortM = along === "x" ? spanM : lenM;
   const rows = p.rows || Math.max(1, Math.floor((shortM * 100 + 0.5) / sp.row));

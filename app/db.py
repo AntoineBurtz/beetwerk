@@ -191,6 +191,7 @@ DEFAULT_SETTINGS = {
     "rotation_years": "3",
     "bed_mode": "individual",  # "uniform": alle Beete gleich breit, Reihen entlang der langen Seite
     "bed_width": "1.2",
+    "beds_locked": "0",  # "1": Beete lassen sich auf der Karte nicht verschieben, Ziehen bewegt den Ausschnitt
 }
 
 

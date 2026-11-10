@@ -60,15 +60,27 @@ def test_switch_to_uniform_fits_beds_and_plantings(client):
     assert client.patch(f"/api/beds/{nb['id']}", json={"length": 6}).json()["length"] == 6
 
 
-def test_rows_along_long_side_when_uniform():
+def test_beds_can_be_locked(client):
+    # die Sperre ist eine Einstellung des Gartens: sie gilt auf jedem Gerät
+    assert client.get("/api/data").json()["settings"].get("beds_locked", "0") == "0"
+    assert client.patch("/api/settings", json={"beds_locked": "1"}).json()["beds_locked"] == "1"
+    assert client.get("/api/data").json()["settings"]["beds_locked"] == "1"
+    assert client.patch("/api/settings", json={"beds_locked": "ja"}).status_code == 422
+    assert client.patch("/api/settings", json={"beds_locked": "0"}).json()["beds_locked"] == "0"
+
+
+def test_rows_always_run_along_the_bed():
     crop = {"row_spacing": 25, "plant_spacing": 10}
     bed = {"kind": "bed", "length": 6, "width": 1.2}
     p = {"len": 0.5, "span": None, "offset": 0, "rows": None, "row_spacing": None, "plant_spacing": None, "varieties": None}
-    # sonst: Reihen entlang der längeren Seite der Fläche (1,2 m quer) – 2 Reihen à 12
-    assert baserow.plant_count(p, crop, bed) == 24
-    # gleich breite Beete: Reihen längs im Beet – 4 Reihen à 5
-    assert baserow.plant_count(p, crop, bed, uniform=True) == 20
-    assert baserow.plant_count(p, crop, {**bed, "kind": "greenhouse"}, uniform=True) == 24
+    # ein kurzer Satz über die Beetbreite: Reihen trotzdem längs im Beet – 4 Reihen à 5, nicht 2 quer à 12
+    assert baserow.plant_count(p, crop, bed) == 20
+    assert baserow.plant_count(p, crop, {**bed, "kind": "greenhouse"}) == 20
+    assert baserow.plant_count(p, crop, {**bed, "kind": "raised"}) == 20
+    # Beet breiter als lang: die lange Seite ist die Breite, dort entlang laufen die Reihen – 2 Reihen à 60
+    assert baserow.plant_count(p, crop, {"kind": "bed", "length": 1.2, "width": 6}) == 2 * 60
+    # ohne Beet entlang der Länge des Satzes (Breite 1 m): 4 Reihen à 5
+    assert baserow.plant_count(p, crop, None) == 20
 
 
 def test_goal_successions_are_full_width_strips():

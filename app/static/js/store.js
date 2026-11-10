@@ -1,5 +1,5 @@
 // Zentraler Zustand: Daten vom Server, Stichtag, Auswahl. Änderungen laufen optimistisch.
-import { analyse, todayNum, rules } from "./util.js";
+import { analyse, todayNum } from "./util.js";
 import { toast } from "./ui.js";
 
 async function request(method, url, body) {
@@ -67,7 +67,6 @@ export function subscribe(fn) {
 
 export function emit(reason = "data") {
   if (reason === "data") {
-    rules.uniformBeds = state.settings?.bed_mode === "uniform";
     for (const id of state.marked) if (!state.plantings.some((p) => p.id === id)) state.marked.delete(id);
     issues = analyse(state);
   }

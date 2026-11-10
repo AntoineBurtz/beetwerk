@@ -5,7 +5,7 @@ Anbauplanung für den Gemüsegarten mit zwei gekoppelten Ansichten:
 - **Beetkarte**: Grundstück mit maßstäblichen Beeten (wie bei GrowVeg). Beete ziehst, drehst und skalierst du direkt auf der Karte. Sätze liegen als Flächen im Beet, mit Reihen und einzelnen Pflanzen.
 - **Zeitleiste**: Jede Zeile ist ein Beet, jeder Balken ein Satz mit Anzucht, Zeit im Beet und Ernte (wie bei Qrop). Balken lassen sich verschieben, verlängern und in ein anderes Beet ziehen. Oben wählst du, wie viel sie zeigt: **1 Jahr**, **1½ Jahre** oder **2 Jahre** – also bis ins Folgejahr, etwa für Knoblauch, Wintergemüse oder die Planung im Herbst.
 
-Beide Ansichten hängen am **Stichtag** (das gelbe Etikett). Verschiebst du ihn in der Zeitleiste oder im Regler unter der Karte, zeigt die Karte, was an diesem Tag wo im Boden ist. Der Regler zeigt außerdem die Flächenauslastung über das Jahr. Was erst später kommt, steht blass und gestrichelt mit „ab …“ schon in seinem Beet, solange die Fläche bis dahin frei ist – so sieht man im Herbst, was für das Frühjahr geplant ist.
+Beide Ansichten hängen am **Stichtag** (das gelbe Etikett). Verschiebst du ihn in der Zeitleiste oder im Regler unter der Karte, zeigt die Karte, was an diesem Tag wo im Boden ist. Der Regler zeigt außerdem die Flächenauslastung über das Jahr. Freie Flächen sagen dabei, was als Nächstes kommt (**geplant**: abgesteckt, mit „ab …“) oder – wenn nichts geplant ist – was dort zuletzt stand (**abgeerntet**: Stoppeln, mit „bis …“). So sieht man im Herbst, was für das Frühjahr geplant ist.
 
 Dazu gibt es:
 
@@ -16,7 +16,9 @@ Dazu gibt es:
 - Kulturenliste mit 36 Gemüsen als Startwerte (Anzucht, Kulturdauer, Abstände, Familie), frei anpassbar.
 - Folgesätze mit einem Klick, Rückgängig (Strg+Z), JSON-Sicherung.
 - Mehrere Sätze markieren und gemeinsam verschieben, ändern oder löschen – in der Zeitleiste und in der Liste unter „Sätze“.
-- Gleich breite Beete: Beim Einrichten wählst du, ob alle Beete dieselbe Breite haben; dann steht die Breite fest und die Pflanzreihen laufen immer entlang der langen Beetseite.
+- Gleich breite Beete: Beim Einrichten wählst du, ob alle Beete dieselbe Breite haben; dann steht die Breite fest und du ziehst nur noch die Länge.
+- Pflanzreihen laufen in jedem Beet in Beetrichtung, also entlang der langen Seite – nie quer.
+- Beete sperren: Das Schloss auf der Karte hält die Beete fest, damit beim Verschieben des Ausschnitts nichts verrutscht.
 - Grundstück auf dem Luftbild: Grenze einzeichnen, Beete liegen am echten Ort, Luftbild hinter den Beeten ein- und ausblenden.
 - Wetterband in der Zeitleiste: Regen, Frost und Wasserbilanz mit empfohlenen Gießtagen (Daten von Open-Meteo).
 - Wetter-Seite mit Diagrammen und Monatstabelle, jeweils im Vergleich zum Mittel der letzten 20 Jahre.
@@ -191,7 +193,7 @@ Du gibst Kultur, Sorte, Erntezeitraum und die **Menge je Woche** an, etwa „6 K
 
 - Das Beet-Feld zeigt für jedes Beet, wie viel Länge die Folge dort bräuchte, ob alles passt und ob die Fruchtfolge stört. Bei einer neuen Folge ist das Beet mit der kleinsten Fläche schon gewählt („empfohlen“). „Ab Meter“ leer lassen sucht die beste Stelle.
 - Der **Beetplan** zeigt das Beet über die Zeit (Zeit nach rechts, Beetlänge nach unten): hell die Zeit im Beet, kräftig die Ernte, grau andere Sätze, gestrichelt der Block. Unter „Feinheiten“ gibt es eine Pause zwischen Abernten und Neubelegung.
-- Die Karte zeigt, was am **Stichtag** im Beet steht. Nach dem Anlegen springt „Auf der Karte zeigen“ in der Meldung (oder „Auf der Karte“ in der Übersicht) auf den Tag, an dem die meisten Sätze der Folge im Beet stehen, und wählt das Beet. Der Block ist gestrichelt umrandet – schon bis zu fünf Monate vorher mit „ab …“, damit man beim Planen im Winter sieht, dass die Fläche vergeben ist. Einen Satz darin ziehen verschiebt die **ganze Folge**; Größe und Lage einzelner Sätze bestimmt die Folge.
+- Die Karte zeigt, was am **Stichtag** im Beet steht. Nach dem Anlegen springt „Auf der Karte zeigen“ in der Meldung (oder „Auf der Karte“ in der Übersicht) auf den Tag, an dem die meisten Sätze der Folge im Beet stehen, und wählt das Beet. Bevor die Folge beginnt, steht ihr Block als **eine geplante Fläche** im Beet („Satzfolge Kopfsalat, ab 1. Mär“) – solange dort nichts anderes steht. Läuft die Folge, umrahmt eine Linie den Block, und ihre Sätze erscheinen einzeln. Einen Satz darin ziehen verschiebt die **ganze Folge**; Größe und Lage einzelner Sätze bestimmt die Folge.
 - Neue Folgen planen im Herbst automatisch das nächste Jahr (liegt Ende August hinter dem Stichtag, beginnt die Erntezeit im Folgejahr).
 - In der Zeitleiste stehen die Sätze als **eine Satzfolge** in einer Spur; der zweite Klick öffnet die Übersicht mit Beetplan, Stand, nächster Aussaat und allen Sätzen. „Sätze einzeln zeigen“ klappt die Folge auf.
 - **Ändern** (Menge, Wochen, Zeitraum, Beet, Stelle) rechnet alle noch nicht begonnenen Sätze neu und legt sie neu in den Block. Begonnene Sätze (gesät, gepflanzt oder bonitiert) bleiben, wo und wie sie sind; die anderen ordnen sich drumherum. Löschen nimmt die nicht begonnenen Sätze mit.
@@ -264,9 +266,10 @@ Danach im Browser `http://<server>:8000` öffnen. Beim ersten Start ist der Gart
 Im leeren Garten fragt Beetwerk außerdem, ob **alle Beete gleich breit** sind (mit Breite, z. B. 1,20 m) oder jedes Beet eigene Maße hat. Bei gleicher Breite:
 
 - bekommt jedes neue Beet diese Breite; auf der Karte ziehst du nur noch die Länge, und ein hochkant aufgezogenes Beet wird gedreht;
-- laufen die Pflanzreihen immer entlang der langen Beetseite – die Pflanzenzahl rechnet sich aus Länge × Reihen über die Beetbreite;
 - sind Sätze aus dem satzweisen Anbau ohne Beet Streifen über die ganze Beetbreite;
 - gilt das für Flächen der Art „Beet“; Hochbeete, Gewächshäuser und Wege behalten eigene Maße.
+
+Unabhängig davon laufen die **Pflanzreihen in jedem Beet entlang der langen Seite** – auch wenn ein Satz nur ein kurzes Stück des Beets belegt. Die Pflanzenzahl rechnet sich aus Reihen über die Beetbreite × Plätze entlang der Länge des Satzes.
 
 Umstellen geht jederzeit unter Einstellungen → Beete. Beete mit anderer Breite werden dann nach Rückfrage angeglichen: die Mitte bleibt, quer liegende Beete werden um 90° gedreht, und die Sätze darin ziehen mit.
 
@@ -296,14 +299,15 @@ BEETWERK_DATA=./data uvicorn app.main:app --host 0.0.0.0 --port 8000
 | Wo | Was |
 |---|---|
 | Karte | Beet anklicken und ziehen verschiebt es (10-cm-Raster). Griffe rechts und unten ändern die Größe, der runde Griff oben dreht (15°-Schritte, mit Umschalt 1°). |
+| Karte | **Schloss** (links, unter den Zoom-Knöpfen): sperrt alle Beete. Ziehen über einem Beet verschiebt dann den Ausschnitt statt das Beet; Griffe, Pfeiltasten und „90° drehen“ sind aus, Antippen wählt das Beet weiterhin. Sätze verschiebst du auch bei Sperre – aber erst, nachdem du sie angetippt hast: Ziehen auf einem nicht gewählten Satz bewegt ebenfalls nur den Ausschnitt. Die Sperre gilt für den Garten, also auf jedem Gerät; entsperren über das Schloss oder „Entsperren“ in der Beetübersicht. |
 | Karte | Kultur aus der Seitenleiste auf ein Beet ziehen legt einen Satz an. Termine werden aus den Kulturdaten so berechnet, dass der Satz am Stichtag ins Beet kommt. |
 | Karte | Satz anklicken und ziehen verschiebt ihn im Beet, die vier Griffe ändern Länge und Breite. Pfeiltasten verschieben um 10 cm (mit Umschalt 1 m), Entf löscht, Eingabe öffnet den Dialog. Die Seitenleiste zeigt die Übersicht des gewählten Beets oder Satzes; Kultur und Sorten darin führen zu ihren Übersichten. |
-| Karte | Gestrichelte Flächen: schraffiert sind Sätze, die in den nächsten drei Wochen ins Beet kommen; blass mit „bis 14. Jun“ sind Sätze, die in diesem Jahr schon abgeerntet sind – dort stand schon etwas, und dort lässt sich neu säen. Jungpflanzen in Anzucht stehen in der Seitenleiste. |
-| Karte | **Geplante Sätze:** Ein Satz, der erst später ins Beet kommt (bis gut ein Jahr voraus), liegt als blasse Fläche mit fein gestrichelter Linie und „ab 1. Apr 2027“ in seinem Beet – er lässt sich wie jeder andere antippen, verschieben und in der Größe ändern. Steht auf seiner Fläche am Stichtag noch etwas anderes, bleibt die Karte ruhig: neben dem Beetnamen steht dann „+2 später“, und die Beetübersicht führt unter „Belegung 2027“ auf, was im Folgejahr kommt. Der **gewählte** Satz ist immer zu sehen, auch über einer anderen Kultur. |
+| Karte | **Jetzt, später, vorher:** Die Karte zeigt auf jeder Stelle nur eines – was am Stichtag dort steht, sonst was als Nächstes kommt, sonst was dort zuletzt stand. **Im Beet:** farbige Fläche mit den Pflanzen. **Geplant** (bis gut ein Jahr voraus): die Fläche ist abgesteckt – Rahmen mit Eckmarken in der Kulturfarbe, feine Saatrillen in Reihenrichtung, der Boden scheint durch, dazu „ab 1. Apr 2027“. **Abgeerntet** (im Jahr des Stichtags): Stoppeln ohne Farbe, fein gepunktet umrandet, kleine Schrift mit Farbpunkt und „abgeerntet 15. Sep“ – die Fläche ist frei. Eine Legende unten links nennt die drei Zustände. |
+| Karte | Steht auf der Fläche eines geplanten Satzes am Stichtag noch etwas anderes, bleibt die Karte ruhig: neben dem Beetnamen steht dann „+2 später“ (eine Satzfolge zählt einmal), und die Beetübersicht führt unter „Belegung 2027“ auf, was im Folgejahr kommt. Geplante und abgeerntete Flächen lassen sich antippen; die Seitenleiste nennt dann unter **Davor** und **Danach**, was vorher und nachher auf derselben Stelle steht. Der **gewählte** Satz ist immer ganz zu sehen – als helle Karte über dem, was dort gerade steht. Geplante Sätze lassen sich verschieben und in der Größe ändern, abgeerntete liegen fest. |
 | Sätze | Nach „Neuer Satz“ mit Beet nennt die Meldung das Beet („Möhre angelegt in Beet 2“). **Auf der Karte zeigen** wechselt zur Karte, wählt den Satz und stellt den Stichtag auf den Tag, an dem er ins Beet kommt. Ohne Beet angelegt führt „Beet zuweisen“ zur Karte; dort genügt ein Tipp aufs Beet. |
 | Karte | Ebenen-Symbol links blendet das Luftbild ein oder aus. Darunter zeigt der Pfeil nach Norden. |
 | Karte | **+** unten rechts: Art der Fläche wählen (Beet, Hochbeet, Gewächshaus, Weg, Sonstiges) und auf der Karte aufziehen; Antippen legt eine Fläche in Standardgröße an. Mehrere nacheinander möglich, „Fertig“ beendet. |
-| Karte | Sätze ohne Beet (z. B. aus der Zeitleiste ohne Beet angelegt) zeigt ein Hinweis oben rechts. In der Seitenleiste lassen sie sich auf ein Beet ziehen oder antippen und dann aufs Beet tippen; beim Antippen springt der Stichtag zur Aussaat bzw. Pflanzung des Satzes. Tippst oder ziehst du in eine abgeerntete Fläche, übernimmt der Satz genau deren Lage. |
+| Karte | Sätze ohne Beet (z. B. aus der Zeitleiste ohne Beet angelegt) zeigt ein Hinweis oben rechts. In der Seitenleiste lassen sie sich auf ein Beet ziehen oder antippen und dann aufs Beet tippen; beim Antippen springt der Stichtag zur Aussaat bzw. Pflanzung des Satzes. Tippst oder ziehst du in eine abgeerntete Fläche (beim Setzen hell umrandet), übernimmt der Satz genau deren Lage. |
 | Karte | **Folgesatz:** Bei Sätzen einer Satzfolge heißt der Knopf „Nächster Satz (2/7)“: Er wählt den nächsten geplanten Satz, springt zu seiner Aussaat bzw. Pflanzung und – wenn die Folge noch kein Beet hat – wartet, bis du ihn aufs Beet tippst. Mit Beet liegen alle Sätze schon im Block. Bei anderen Sätzen legt „Folgesatz“ eine Kopie 14 Tage später an, der Stichtag springt mit. |
 | Zeitleiste | Balken waagerecht ziehen verschiebt alle Termine, senkrecht in eine andere Zeile wechselt das Beet. Rechte Kante ändert das Ernteende, linke Kante den Aussaattermin. |
 | Zeitleiste | Klick auf eine freie Stelle legt dort einen neuen Satz an; ist gerade etwas markiert, hebt der Klick nur die Markierung auf. Klick in den Kopf setzt den Stichtag. |
@@ -321,7 +325,7 @@ BEETWERK_DATA=./data uvicorn app.main:app --host 0.0.0.0 --port 8000
 - **Satz**: eine Pflanzung einer Kultur und Sorte an einer Stelle, mit Aussaat, ggf. Pflanzung, Erntebeginn und Ernteende.
 - **Bis zur Ernte** (Kultur): Tage ab Pflanzung, bei Direktsaat ab Aussaat.
 - **Breite leer** im Satz heißt: reicht bis zum Beetrand.
-- **Reihen leer** heißt: automatisch berechnet. Reihen laufen immer entlang der längeren Seite der Fläche (ein 1 × 20 m Beet mit 50 × 50 cm hat 2 Reihen à 40 Pflanzen).
+- **Reihen leer** heißt: automatisch berechnet. Reihen laufen immer in Beetrichtung, also entlang der langen Beetseite (ein 1 × 20 m Beet mit 50 × 50 cm hat 2 Reihen à 40 Pflanzen) – auch bei einem Satz, der nur ein kurzes Stück über die Beetbreite belegt.
 - **Reihe und Platz** im Mischsatz werden ab der gewählten Startecke gezählt.
 
 ## Schnittstelle
