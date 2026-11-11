@@ -3,7 +3,7 @@
 // gemacht hat; so braucht die Folge so wenig Beet wie möglich. Bearbeitet wird die Folge, die Sätze ziehen mit.
 import { state, api, find, load, setDay, select } from "./store.js";
 import {
-  h, s, fmtDay, dayNum, isoOf, isoWeek, plural, fmtNum, phases, yearOf, monthStarts, MONTHS_SHORT, mix, clamp, round2,
+  h, s, fmtDay, dayNum, isoOf, isoWeek, plural, fmtNum, phases, yearOf, monthStarts, MONTHS_SHORT, mix, clamp, round2, METHOD_LABEL,
 } from "./util.js";
 import { toast, confirmDialog, icon } from "./ui.js";
 import { shell, field } from "./editor.js";
@@ -194,6 +194,16 @@ export function openGoalEditor(goal, { year, bed_id = null, crop_id = null, star
     h("option", { value: "", selected: !g.crop_id }, "– Kultur wählen –"),
     crops.map((c) => h("option", { value: c.id, selected: c.id === g.crop_id }, c.name)));
   const variety = h("input", { value: g.variety, list: "goal-varieties", autocomplete: "off", placeholder: "optional" });
+  // Anbauart der Folge: üblich wie die Kultur, auf Wunsch die andere – mit deren Kulturdauer und Abständen
+  const methodSel = h("select", {});
+  const paintMethod = () => {
+    const crop = find.crop(Number(cropSel.value));
+    const current = methodSel.value || g.method || "";
+    methodSel.replaceChildren(
+      h("option", { value: "", selected: !current }, crop ? `wie üblich: ${METHOD_LABEL[crop.method]}` : "wie bei der Kultur üblich"),
+      ...["direct", "transplant"].filter((k) => !crop || k !== crop.method)
+        .map((k) => h("option", { value: k, selected: current === k }, METHOD_LABEL[k])));
+  };
   const varList = h("datalist", { id: "goal-varieties" });
   const startIn = h("input", { type: "date", value: g.start_date, required: true });
   const endIn = h("input", { type: "date", value: g.end_date, required: true });
@@ -272,6 +282,7 @@ export function openGoalEditor(goal, { year, bed_id = null, crop_id = null, star
     const names = new Set(state.varieties.filter((v) => v.crop_id === crop?.id).map((v) => v.name));
     varList.replaceChildren(...[...names].sort((a, b) => a.localeCompare(b, "de")).map((n) => h("option", { value: n })));
     windowIn.placeholder = crop ? `${crop.harvest_days} (wie Kultur)` : "";
+    paintMethod();
     intervalIn.placeholder = "wie Erntefenster";
     if (crop && !touched) {
       try {
@@ -307,6 +318,7 @@ export function openGoalEditor(goal, { year, bed_id = null, crop_id = null, star
     gap_days: numOf(gapIn, "Pause", { int: true, optional: true }),
     seasonal: seasonal.checked, notes: notes.value.trim(), weeks: weeksInRange(),
     bed_id: chosenBed(), block_start: blockIn.value.trim() ? numOf(blockIn, "Ab Meter") : -1,
+    method: methodSel.value,
   });
 
   let seq = 0;
@@ -372,6 +384,9 @@ export function openGoalEditor(goal, { year, bed_id = null, crop_id = null, star
         h("strong", {}, plural(ok.length, "Satz", "Sätze")), ` alle ${out.interval_days} Tage, zusammen ${out.plants} Pflanzen`,
         ` · jeder Satz wird ${out.window_days} Tage beerntet`),
       h("p", { class: "muted small", style: { margin: 0 } }, BASIS[out.basis] || ""),
+      crop && out.method !== crop.method ? h("p", { class: "muted small", style: { margin: 0 } },
+        `${METHOD_LABEL[out.method]} statt ${METHOD_LABEL[crop.method]}: ${out.field_days} Tage im Beet bis zur Ernte`
+        + `${out.estimated ? " (geschätzt – in der Kultur eintragbar)" : ""}.`) : null,
       skipped.length ? h("p", { class: "muted small", style: { margin: 0 } },
         `${plural(skipped.length, "Satz entfällt", "Sätze entfallen")}, weil in ${skipped.length === 1 ? "seinen" : "ihren"} Wochen nichts geerntet werden soll.`) : null,
       cold.length ? h("p", { class: "note-inline" }, `${plural(cold.length, "Erntetermin", "Erntetermine")} (${cold.map((x) => day(x.harvest_start)).join(", ")}) `
@@ -396,6 +411,8 @@ export function openGoalEditor(goal, { year, bed_id = null, crop_id = null, star
   for (const el of [per, windowIn, intervalIn, gapIn, unit, blockIn]) el.addEventListener("input", refresh);
   seasonal.addEventListener("change", refresh);
   cropSel.addEventListener("change", fillCrop);
+  methodSel.addEventListener("change", refresh);
+  paintMethod();
   bedSel.addEventListener("change", () => {
     bedChoice = bedSel.value;
     blockIn.value = ""; // anderes Beet: günstigste Stelle suchen
@@ -435,6 +452,7 @@ export function openGoalEditor(goal, { year, bed_id = null, crop_id = null, star
     blockInfo);
   ui.body.append(
     h("div", { class: "grid-2" }, field("Kultur", cropSel), field("Sorte", variety, "Für Frühjahr und Sommer eigene Folgen mit passender Sorte"), varList),
+    field("Anbau", methodSel),
     h("div", { class: "grid-2" },
       h("label", { class: "field" }, h("span", {}, "Ernte ab"), startIn, startHint),
       h("label", { class: "field" }, h("span", {}, "Ernte bis"), endIn, endHint)),

@@ -192,23 +192,25 @@ def seed(conn, force: bool = False) -> None:
 
 def add_herbs(conn) -> list[str]:
     """Gängige Kräuter als Kulturen ergänzen, soweit es sie unter diesem Namen noch nicht gibt."""
+    from .methods import both_common
     from .seed import CROPS
     have = {r["name"].strip().lower() for r in db.rows(conn, "SELECT name FROM crops")}
     added = []
     for row in CROPS:
         if row[0] in HERBS and row[0].lower() not in have:
             conn.execute("""INSERT INTO crops(name, family, color, method, nursery_days, field_days,
-                                              harvest_days, row_spacing, plant_spacing) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", row)
+                                              harvest_days, row_spacing, plant_spacing, alt)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (*row, int(both_common(row[0]))))
             added.append(row[0])
+    if added:  # wer vorgezogen werden kann, bekommt Gefäß und Keimrate für die Anzucht
+        from . import nursery
+        ids = {r["id"] for r in db.rows(conn, f"SELECT id FROM crops WHERE name IN ({', '.join('?' for _ in added)})", added)}
+        nursery.assign_defaults(conn, ids)
     return added
 
 
 def lists(conn) -> dict:
     return {"fertilizers": db.rows(conn, "SELECT * FROM fertilizers ORDER BY sort, id")}
-
-
-def export_tables(conn) -> dict:
-    return lists(conn)
 
 
 def import_tables(conn, data: dict) -> None:
@@ -294,7 +296,8 @@ def crop_reference():
                 "row_spacing": ref["row_spacing"], "plant_spacing": ref["plant_spacing"], "spacing_src": ref["spacing_src"],
                 "feed": ref["feed"], "feed_cut": ref["feed_cut"], "feed_start": ref["feed_start"], "feed_late": ref["feed_late"],
                 "feed_src": ref["feed_src"]}})
-        return {"levels": LEVELS, "crops": out}
+        have = {c["name"].strip().lower() for c in out}
+        return {"levels": LEVELS, "crops": out, "missing_herbs": [n for n in HERBS if n.lower() not in have]}
 
 
 @router.post("/api/crops/herbs")

@@ -1,6 +1,6 @@
 // Kulturen: Grunddaten, aus denen Termine, Abstände und Fruchtfolge abgeleitet werden.
 import { state } from "./store.js";
-import { h } from "./util.js";
+import { h, cropFor, otherMethod, METHOD_LABEL } from "./util.js";
 import { openCropEditor } from "./editor.js";
 import { openCropOverview } from "./overview.js";
 import { varietiesView, forgetProfiles } from "./varieties.js";
@@ -70,8 +70,8 @@ export function mountCrops(root) {
       }
       rows.push(h("tr", { tabindex: "0", onclick: () => openCropOverview(c), onkeydown: (e) => { if (e.key === "Enter") openCropOverview(c); } },
         h("td", {}, h("div", { class: "crop-cell" }, h("span", { class: "dot", style: { background: c.color } }), c.name)),
-        h("td", {}, c.method === "transplant" ? "Anzucht" : "Direktsaat"),
-        h("td", { class: "r" }, c.method === "transplant" ? `${c.nursery_days} Tage` : h("span", { class: "muted" }, "–")),
+        h("td", {}, METHOD_LABEL[c.method], c.alt ? h("span", { class: "muted" }, `, auch ${METHOD_LABEL[otherMethod(c.method)]}`) : null),
+        h("td", { class: "r" }, c.method === "transplant" || c.alt ? `${cropFor(c, "transplant").nursery_days} Tage` : h("span", { class: "muted" }, "–")),
         h("td", { class: "r" }, `${c.field_days} Tage`),
         h("td", { class: "r" }, `${c.harvest_days} Tage`),
         h("td", { class: "r nowrap" }, `${c.row_spacing} × ${c.plant_spacing} cm`),

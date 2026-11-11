@@ -238,11 +238,10 @@ export function mountMap(root) {
 
     seen = { planned: 0, past: 0 };
     const bedLayer = s("g", {});
-    const overLayer = s("g", {});
     const ordered = [...state.beds].sort((a, b) => (a.kind === "path" ? -1 : 0) - (b.kind === "path" ? -1 : 0));
-    for (const bed of ordered) bedLayer.append(drawBed(bed, k, overLayer));
+    for (const bed of ordered) bedLayer.append(drawBed(bed, k));
 
-    svg.replaceChildren(defs(), groundLayer, ruler, bedLayer, overLayer);
+    svg.replaceChildren(defs(), groundLayer, ruler, bedLayer);
 
     empty.hidden = state.beds.length > 0 || !state.loaded || state.mode?.type === "bed";
     empty.classList.toggle("low", !!state.geo);
@@ -648,7 +647,7 @@ export function mountMap(root) {
       stroke: mix(crop?.color || "#6a9b3c", "#1d2b24", 0.4) });
   }
 
-  function drawBed(bed, k, overLayer) {
+  function drawBed(bed, k) {
     const L = bed.length * U, Wd = bed.width * U;
     const selBed = state.sel?.type === "bed" && state.sel.id === bed.id;
     const g = s("g", { class: "bed", "data-bed": bed.id, transform: bedTransform(bed) });

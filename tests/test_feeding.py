@@ -112,6 +112,7 @@ def test_old_backup_without_feeding_gets_levels(client):
     crops = {c["name"]: c for c in data["crops"]}
     assert crops["Tomate"]["feed"] == "medium" and data["fertilizers"]
     assert "Koriander" not in crops  # eine Sicherung bekommt keine Kulturen dazu
+    assert client.get("/api/crops/reference").json()["missing_herbs"] == ["Koriander"]  # der Dialog bietet sie an
     assert client.post("/api/crops/herbs").json()["added"] == ["Koriander"]
 
 

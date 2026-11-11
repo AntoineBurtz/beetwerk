@@ -7,7 +7,7 @@ import {
 import { toast, confirmDialog, icon, iconBtn } from "./ui.js";
 import { shell, field } from "./editor.js";
 import {
-  bon, onBon, loadBonitur, bbchImages, plantsOf, plantById, traitByKey, traitById, values, latest, onDate,
+  bon, onBon, loadBonitur, bbchImages, plantsOf, traitByKey, traitById, values, latest, onDate,
   bbchOf, firstReached, median, appliesTo, traitsFor, bySection, inWindow, fmtValue, sameValue, plantTarget, varietyTarget,
   obsOfPlanting, obsOfPlant, fixPlants, addPlant, patchPlant, deletePlant, setLabels, saveEntries, patchObs,
   deleteObs, undoSaved, uploadPhoto, saveTrait, deleteTrait, saveSet, deleteSet, SECTION_LABEL, FREQ_LABEL,

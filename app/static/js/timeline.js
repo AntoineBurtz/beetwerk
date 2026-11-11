@@ -555,7 +555,7 @@ export function mountTimeline(root) {
     d.el.title = d.edge === "r" ? `Ernte bis ${fmtDay(day)}` : d.edge === "l" ? `Aussaat ${fmtDay(day)}` : `Aussaat ${fmtDay(day)}`;
   }
 
-  async function onBarUp(e) {
+  async function onBarUp() {
     const d = drag;
     drag = null;
     if (!d) return;

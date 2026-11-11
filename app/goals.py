@@ -13,13 +13,13 @@ Ohne Beet entstehen die Sätze wie bisher frei und laufen trotzdem in die Anzuch
 import json
 import math
 from datetime import date, datetime, timedelta, timezone
-from typing import Callable, Optional
+from typing import Callable, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
-from . import db, weather
+from . import db, methods, weather
 
 router = APIRouter()
 
@@ -47,6 +47,7 @@ GOAL_COLUMNS = [
     ("block_len", "REAL"),                          # Länge, die der Block braucht (m), beim Planen gesetzt
     ("gap_days", "INTEGER NOT NULL DEFAULT 0"),     # Pause zwischen Abernten und Neubelegung
     ("weeks", "TEXT NOT NULL DEFAULT '{}'"),        # abweichende Menge je Woche: {"Montag-ISO": Menge}
+    ("method", "TEXT NOT NULL DEFAULT ''"),         # Anbauart der Folge: direct | transplant; leer = wie die Kultur üblich
 ]
 PLANTABLE = ("bed", "raised", "greenhouse")
 STRIP_STEP = 0.05  # Länge der Streifen in 5-cm-Schritten
@@ -348,7 +349,8 @@ def _started(conn, p: dict) -> bool:
 
 def compute(conn, g: dict, fd) -> dict:
     """Sätze mit Terminen, Größe und – mit Beet – ihrer Lage im Block."""
-    crop = dict(conn.execute("SELECT * FROM crops WHERE id = ?", (g["crop_id"],)).fetchone())
+    # die Kultur mit Dauer und Abständen der Anbauart, in der die Folge angebaut wird
+    crop = methods.for_method(dict(conn.execute("SELECT * FROM crops WHERE id = ?", (g["crop_id"],)).fetchone()), g.get("method") or None)
     width = db.uniform_width(conn)
     bed = _bed(conn, g.get("bed_id"))
     items = successions(g, crop, fd, width, bed)
@@ -425,11 +427,6 @@ def _drop(conn, p: dict) -> None:
     conn.execute("DELETE FROM plantings WHERE id = ?", (p["id"],))
 
 
-def _amount(goal: dict) -> str:
-    a = goal["amount"]
-    return f"{a:g} {goal['unit']}".replace(".", ",")
-
-
 def _public(g: dict) -> dict:
     return {**g, "weeks": weeks_of(g)}
 
@@ -456,6 +453,7 @@ class GoalIn(BaseModel):
     block_start: Optional[float] = Field(None, ge=-1, le=500)  # -1: Stelle selbst suchen
     gap_days: Optional[int] = Field(None, ge=0, le=60)
     weeks: Optional[dict[str, float]] = None                  # {"Montag-ISO": Menge}, nur Abweichungen
+    method: Optional[Literal["", "direct", "transplant"]] = None  # leer: übliche Anbauart der Kultur
 
     @field_validator("weeks")
     @classmethod
@@ -530,7 +528,8 @@ def _plan_out(conn, g: dict, fd, basis: str, with_beds: bool = False) -> dict:
     crop, items = r["crop"], r["items"]
     window = g.get("window_days") or crop["harvest_days"] or 14
     out = {"successions": items, "basis": basis, "window_days": window, "interval_days": g.get("interval_days") or window,
-           "method": crop["method"], "plants": sum(s["count"] for s in items if not s["too_cold"]),
+           "method": crop["method"], "estimated": crop["estimated"], "field_days": crop["field_days"],
+           "plants": sum(s["count"] for s in items if not s["too_cold"]),
            "bed_id": r["bed"]["id"] if r["bed"] else None, "block_start": r["block_start"], "block_len": r["block_len"],
            "unplaced": len(r["unplaced"])}
     if with_beds:

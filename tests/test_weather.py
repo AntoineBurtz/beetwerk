@@ -1,6 +1,5 @@
 import os
 import tempfile
-import urllib.parse
 from datetime import date, datetime, timedelta, timezone
 
 import pytest

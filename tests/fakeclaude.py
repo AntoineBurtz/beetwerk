@@ -44,7 +44,7 @@ class Fake(BaseHTTPRequestHandler):
                 "descriptionurl": "https://commons.wikimedia.org/wiki/File:Ochsenherz.jpg",
                 "extmetadata": {"LicenseShortName": {"value": "CC BY-SA 4.0"}, "Artist": {"value": "<a>Gärtnerin</a>"}}}]}}}})
         if self.path == "/shop/ochsenherz":
-            return self._send(200, f'<html><head><meta property="og:image" content="/img/shop.jpg"></head></html>',
+            return self._send(200, '<html><head><meta property="og:image" content="/img/shop.jpg"></head></html>',
                               "text/html; charset=utf-8")
         if self.path.startswith("/img/"):
             return self._send(200, _jpeg(), "image/jpeg")

@@ -5,6 +5,7 @@ import { state, api, find, subscribe, select, issuesOf, create, setDay, emit } f
 import {
   h, phases, fmtDay, fmtNum, plural, yearOf, yearStart, yearLength, isMixed, varietyText, plantCount, rowCount,
   spanOf, spacing, mixPlan, KIND_LABEL, PLANTABLE, isoWeek, dayNum, onBedAt, isoOf, monthStarts, MONTHS_SHORT,
+  cropFor, otherMethod, METHOD_LABEL,
 } from "./util.js";
 import { icon, toast } from "./ui.js";
 import { shell, openCropEditor, openBedEditor, openPlantingEditor, followUp, goalSeries } from "./editor.js";
@@ -152,23 +153,30 @@ export function openCropOverview(crop0) {
       freshSummaries(repaint);
       const year = yearOf(state.day);
       const transplant = c.method === "transplant";
+      const second = cropFor(c, otherMethod(c.method));
       const sow = find.container(c.sow_container_id);
       const pot = find.container(c.pot_container_id);
       const place = find.place(c.place_id);
       const grow = find.place(c.grow_place_id);
       const rotation = Number(state.settings.rotation_years ?? 3);
       const main = facts([
-        ["Anbau", transplant ? "Anzucht und Pflanzung" : "Direktsaat"],
+        ["Anbau", `${transplant ? "Voranzucht und Pflanzung" : "Direktsaat"}${c.alt ? `, auch ${METHOD_LABEL[second.method]}` : ""}`],
         ["Kulturdauer", transplant
           ? `${c.nursery_days} Tage Anzucht, ${c.field_days} Tage im Beet bis zur Ernte, ${c.harvest_days} Tage Ernte`
           : `${c.field_days} Tage bis zur Ernte, ${c.harvest_days} Tage Ernte`],
         ["Abstände", `${c.row_spacing} × ${c.plant_spacing} cm (${fmtNum(10000 / (c.row_spacing * c.plant_spacing))} Pflanzen je m²)`],
+        // die andere Anbauart mit ihrer Kulturdauer und, wenn sie abweichen, ihren Abständen
+        [METHOD_LABEL[second.method], !c.alt ? null : (second.method === "transplant"
+          ? `${second.nursery_days} Tage Anzucht, ${second.field_days} Tage im Beet bis zur Ernte`
+          : `${second.field_days} Tage bis zur Ernte`) + (second.estimated ? " (geschätzt)" : "")
+          + (second.row_spacing !== c.row_spacing || second.plant_spacing !== c.plant_spacing
+            ? `, Abstände ${second.row_spacing} × ${second.plant_spacing} cm` : "")],
         ["Fruchtfolge", c.family ? `${c.family}, ${rotation} Jahre Anbaupause` : "keine Familie angegeben – keine Prüfung"],
         ["Düngung", c.feed ? (c.feed === "none" ? "kein Stickstoffdünger, Kompost genügt"
           : `Stickstoffbedarf ${feedLabel(c)}${c.feed_cut ? ", nach den Schnitten nachdüngen" : ""}`) : null],
         ["Bonitur", c.trait_group ? `Merkmale für ${TRAIT_GROUP[c.trait_group]}` : "allgemeine Merkmale"],
       ]);
-      const nursery = transplant ? block("Anzucht", h("ul", { class: "calc" },
+      const nursery = transplant || c.alt ? block("Anzucht", h("ul", { class: "calc" },
         h("li", {}, sow ? `Aussaat in ${sow.name}` : h("span", { class: "muted" }, "Kein Anzuchtgefäß eingestellt"),
           pot ? `, nach ${c.prick_days} Tagen in ${pot.name} pikieren` : ""),
         h("li", {}, `${plural(c.seeds_per_cell ?? 1, "Korn", "Körner")} je Zelle · ${c.germination ?? 80} % Keimrate · `
@@ -414,6 +422,8 @@ export function openGoalOverview(g0) {
         facts([
           ["Kultur", cropLink(crop)],
           ["Sorte", g.variety ? varietyLink(g.crop_id, g.variety) : null],
+          ["Anbau", g.method && crop && g.method !== crop.method
+            ? `${METHOD_LABEL[g.method]} (üblich: ${METHOD_LABEL[crop.method]})` : null],
           ["Ziel", `${fmtNum(g.amount)} ${g.unit} je Woche`
             + (odd.length ? ` · abweichend ${odd.map(([iso, a]) => `KW ${isoWeek(dayNum(iso))}: ${fmtNum(a)}`).join(", ")}` : "")],
           ["Beet", bed ? [bedLink(bed), ` · ${fmtNum(g.block_len || 0, 2)} m ab ${fmtNum(g.block_start || 0, 2)} m (${fmtNum((g.block_len || 0) * bed.width, 1)} m²)`] : "noch keins"],

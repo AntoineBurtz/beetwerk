@@ -605,7 +605,7 @@ export function mountWeather(root) {
           g.addEventListener("blur", hideTip);
           f.svg.append(g);
         });
-        for (const [mmdd, text] of [[fr.stats.spring_median, "Mitte letzter Frost"], [fr.stats.autumn_median, "Mitte erster Frost"]]) {
+        for (const mmdd of [fr.stats.spring_median, fr.stats.autumn_median]) { // Mitte des letzten und des ersten Frosts
           if (!mmdd) continue;
           const x = f.x(dayNum(`2001-${mmdd}`));
           f.grid.append(s("line", { x1: x, x2: x, y1: M.t - 4, y2: M.t + H, stroke: C.frost, "stroke-width": 1.5, "stroke-dasharray": "4 3", class: "median" }));

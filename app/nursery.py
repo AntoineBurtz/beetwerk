@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
-from . import bonitur, db
+from . import bonitur, db, methods
 
 router = APIRouter()
 
@@ -170,16 +170,22 @@ def seed(conn) -> None:
                          [(*c, i) for i, c in enumerate(CONTAINERS)])
     if conn.execute("SELECT 1 FROM settings WHERE key = ?", (SEEDED_KEY,)).fetchone():
         return
+    assign_defaults(conn)
+    conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES (?, '1')", (SEEDED_KEY,))
+
+
+def assign_defaults(conn, crop_ids=None) -> None:
+    """Richtwerte für die Anzucht (Gefäß, Pikieren, Keimrate) für Kulturen, die vorgezogen werden können und noch
+    kein Gefäß haben – alle oder nur die genannten (neu dazugekommene Kulturen)."""
     by_name = {r["name"]: r["id"] for r in db.rows(conn, "SELECT id, name FROM containers")}
-    for c in db.rows(conn, "SELECT id, name, method, sow_container_id FROM crops"):
-        if c["method"] != "transplant" or c["sow_container_id"]:
+    for c in db.rows(conn, "SELECT id, name, method, alt, sow_container_id FROM crops"):
+        if (crop_ids is not None and c["id"] not in crop_ids) or not methods.can_transplant(c) or c["sow_container_id"]:
             continue
         low = c["name"].lower()
         sow, pot, days, k, germ, warm = next((v for word, v in CROP_DEFAULTS if word in low), FALLBACK)
         conn.execute("UPDATE crops SET sow_container_id = ?, pot_container_id = ?, prick_days = ?, seeds_per_cell = ?, "
                      "germination = ?, warm = ? WHERE id = ?",
                      (by_name.get(sow), by_name.get(pot) if pot else None, days, k, germ, warm, c["id"]))
-    conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES (?, '1')", (SEEDED_KEY,))
 
 
 def export_tables(conn) -> dict:

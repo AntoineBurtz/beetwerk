@@ -1,7 +1,7 @@
 // Dialoge zum Bearbeiten von Sätzen, Beeten, Kulturen und Einstellungen.
 import { state, find, create, patch, remove, issuesOf, api, replaceAll, select, emit, setMode, setDay, load } from "./store.js";
 import {
-  h, dayNum, isoOf, datesFromCrop, rowCount, plantCount, spanOf, fmtNum, KIND_LABEL, PLANTABLE,
+  h, dayNum, isoOf, datesFromCrop, cropFor, otherMethod, rowCount, plantCount, spanOf, fmtNum, KIND_LABEL, PLANTABLE,
   phases, rectOf, round2, clamp, plural, fmtDay, isMixed, varietyText, yearOf,
 } from "./util.js";
 import { toast, confirmDialog, icon } from "./ui.js";
@@ -211,7 +211,7 @@ export function openPlantingEditor(planting, defaults = {}) {
 
   const methodSeg = h("div", { class: "seg", role: "radiogroup", "aria-label": "Anbau" },
     h("label", {}, h("input", { type: "radio", name: "method", value: "direct", checked: p.method === "direct" }), "Direktsaat"),
-    h("label", {}, h("input", { type: "radio", name: "method", value: "transplant", checked: p.method === "transplant" }), "Anzucht und Pflanzung"));
+    h("label", {}, h("input", { type: "radio", name: "method", value: "transplant", checked: p.method === "transplant" }), "Voranzucht und Pflanzung"));
 
   const sow = h("input", { type: "date", name: "sow_date", value: p.sow_date || "", required: true });
   const plant = h("input", { type: "date", name: "plant_date", value: p.plant_date || "" });
@@ -237,6 +237,7 @@ export function openPlantingEditor(planting, defaults = {}) {
   const plantedLabel = h("label", { class: "check" }, planted, "gepflanzt");
   const notes = h("textarea", { name: "notes" }, p.notes || "");
 
+  const methodNote = h("p", { class: "calc", style: { margin: 0 }, hidden: true });
   const method = () => methodSeg.querySelector("input:checked")?.value || "direct";
   const crop = () => find.crop(Number(cropSel.value));
   const bed = () => find.bed(Number(bedSel.value));
@@ -246,8 +247,16 @@ export function openPlantingEditor(planting, defaults = {}) {
     const isTp = method() === "transplant";
     plantField.hidden = !isTp;
     plantedLabel.hidden = !isTp;
-    rowSp.placeholder = c ? `${c.row_spacing} (Kultur)` : "";
-    plantSp.placeholder = c ? `${c.plant_spacing} (Kultur)` : "";
+    const eff = cropFor(c, method()); // Dauer und Abstände der gewählten Anbauart
+    rowSp.placeholder = c ? `${eff.row_spacing} (Kultur)` : "";
+    plantSp.placeholder = c ? `${eff.plant_spacing} (Kultur)` : "";
+    methodNote.hidden = !c || method() === c.method;
+    if (!methodNote.hidden) {
+      methodNote.textContent = `${c.name} wird sonst ${c.method === "transplant" ? "vorgezogen" : "direkt gesät"}. `
+        + (isTp ? `Mit Voranzucht: ${eff.nursery_days} Tage Anzucht, dann ` : "Als Direktsaat: ")
+        + `${eff.field_days} Tage im Beet bis zur Ernte${eff.estimated ? " (geschätzt – in der Kultur eintragbar)" : ""}`
+        + (eff.row_spacing !== c.row_spacing || eff.plant_spacing !== c.plant_spacing ? `, Abstände ${eff.row_spacing} × ${eff.plant_spacing} cm.` : ".");
+    }
     const known = new Set(state.varieties.filter((v) => v.crop_id === c?.id).map((v) => v.name));
     for (const q of state.plantings) {
       if (q.crop_id !== c?.id) continue;
@@ -300,6 +309,7 @@ export function openPlantingEditor(planting, defaults = {}) {
 
   function currentDraft() {
     return {
+      method: method(),
       len: num(len.value) ?? 0, offset: num(offset.value) ?? 0, span: num(span.value),
       rows: num(rows.value), row_spacing: num(rowSp.value), plant_spacing: num(plantSp.value),
     };
@@ -314,7 +324,7 @@ export function openPlantingEditor(planting, defaults = {}) {
     let anchor = anchorDay;
     if (!fromAnchor) {
       if (m === "transplant" && plant.value) anchor = dayNum(plant.value);
-      else if (m === "transplant" && sow.value) anchor = dayNum(sow.value) + (c.nursery_days || 28);
+      else if (m === "transplant" && sow.value) anchor = dayNum(sow.value) + cropFor(c, m).nursery_days;
       else if (m === "direct" && sow.value) anchor = dayNum(sow.value);
     }
     const d = datesFromCrop(c, anchor, m);
@@ -333,10 +343,20 @@ export function openPlantingEditor(planting, defaults = {}) {
     }
     refresh();
   });
+  // Anbauart gewechselt: Der Tag, an dem das Beet belegt wird, bleibt – Aussaat, Pflanzung und Ernte
+  // rechnen sich mit der Kulturdauer der neuen Anbauart neu (und bleiben danach frei änderbar).
+  let lastMethod = method();
   methodSeg.addEventListener("change", () => {
     const c = crop();
-    if (method() === "transplant" && !plant.value && sow.value) {
-      plant.value = isoOf(dayNum(sow.value) + (c?.nursery_days || 28));
+    const m = method();
+    const was = lastMethod === "transplant" ? plant.value || sow.value : sow.value;
+    lastMethod = m;
+    if (c && was) {
+      const d = datesFromCrop(c, dayNum(was), m);
+      sow.value = d.sow_date;
+      plant.value = d.plant_date || "";
+      hs.value = d.harvest_start;
+      he.value = d.harvest_end;
     }
     refresh();
   });
@@ -441,6 +461,7 @@ export function openPlantingEditor(planting, defaults = {}) {
       varietyList),
     h("div", { class: "grid-2 stack-sm" }, field("Beet", bedSel),
       h("div", { class: "field" }, h("span", {}, "Anbau"), methodSeg)),
+    methodNote,
     h("fieldset", {},
       h("legend", {}, "Termine"),
       h("div", { class: "grid-4" }, field("Aussaat", sow), plantField, field("Ernte ab", hs), field("Ernte bis", he)),
@@ -580,7 +601,19 @@ export function openCropEditor(crop) {
   const color = h("input", { type: "color", name: "color", value: c.color });
   const method = h("select", { name: "method" },
     h("option", { value: "direct", selected: c.method === "direct" }, "Direktsaat"),
-    h("option", { value: "transplant", selected: c.method === "transplant" }, "Anzucht und Pflanzung"));
+    h("option", { value: "transplant", selected: c.method === "transplant" }, "Voranzucht und Pflanzung"));
+  // Die andere Anbauart: eigene Kulturdauer und Abstände; leer heißt geschätzt bzw. wie bei der üblichen
+  const alt = h("input", { type: "checkbox", checked: !!c.alt });
+  const altLabel = h("span", {});
+  const altDays = h("input", { inputmode: "numeric", value: c.alt_field_days || "" });
+  const altRow = h("input", { inputmode: "numeric", value: c.alt_row_spacing || "", placeholder: "wie üblich" });
+  const altPlant = h("input", { inputmode: "numeric", value: c.alt_plant_spacing || "", placeholder: "wie üblich" });
+  const altLegend = h("legend", {});
+  const altDaysHint = h("span", { class: "hint" });
+  const altBox = h("fieldset", {}, altLegend,
+    h("div", { class: "grid-3" },
+      h("label", { class: "field" }, h("span", {}, "Bis zur Ernte (Tage)"), altDays, altDaysHint),
+      field("Reihenabstand (cm)", altRow), field("Pflanzabstand (cm)", altPlant)));
   const nursery = h("input", { name: "nursery_days", inputmode: "numeric", value: c.nursery_days });
   const fieldDays = h("input", { name: "field_days", inputmode: "numeric", value: c.field_days });
   const harvest = h("input", { name: "harvest_days", inputmode: "numeric", value: c.harvest_days });
@@ -620,12 +653,47 @@ export function openCropEditor(crop) {
       field("Abhärten", hardenDays, "Tage vor der Pflanzung"),
       h("label", { class: "check", style: { alignSelf: "end", minHeight: "38px" } }, warm, "braucht Wärme zum Keimen")),
     state.places.length ? h("div", { class: "grid-2" }, field("Anzuchtplatz", placeIn), field("Platz nach dem Pikieren", growIn)) : null);
+  const nurseryField = field("Anzucht", nursery, "Aussaat bis Pflanzung");
+  const fieldDaysHint = h("span", { class: "hint" });
+  const fieldDaysField = h("label", { class: "field" }, h("span", {}, "Bis zur Ernte"), fieldDays, fieldDaysHint);
+  const canTransplant = () => method.value === "transplant" || alt.checked;
+  // die Eingaben als Kultur, um die Schätzung für die andere Anbauart zu zeigen
+  const typed = (usual = method.value) => ({ method: usual, nursery_days: num(nursery.value) || 0, field_days: num(fieldDays.value) || 0,
+    row_spacing: num(rowSp.value) || 0, plant_spacing: num(plantSp.value) || 0,
+    alt_field_days: num(altDays.value) || 0, alt_row_spacing: num(altRow.value) || 0, alt_plant_spacing: num(altPlant.value) || 0 });
   const paintNursery = () => {
-    nurseryBox.hidden = method.value !== "transplant";
+    const usual = method.value, second = otherMethod(usual);
+    nurseryBox.hidden = !canTransplant();
+    nurseryField.hidden = !canTransplant();
     prickDays.disabled = potCont.value === "0";
+    fieldDaysHint.textContent = usual === "transplant" ? "ab Pflanzung" : "ab Direktsaat";
+    altLabel.textContent = second === "direct" ? "auch als Direktsaat" : "auch mit Voranzucht";
+    altBox.hidden = !alt.checked;
+    altLegend.textContent = second === "direct" ? "Als Direktsaat" : "Mit Voranzucht";
+    if (second === "transplant" && !(num(nursery.value) > 0)) nursery.placeholder = "28";
+    const guess = cropFor({ ...typed(), alt_field_days: 0 }, second).field_days;
+    altDays.placeholder = `${guess} (geschätzt)`;
+    altDaysHint.textContent = second === "direct" ? "ab Direktsaat; leer: Anzuchtdauer kommt dazu, eine Woche Pflanzschock entfällt"
+      : "ab Pflanzung; leer: Anzuchtdauer geht ab, eine Woche Pflanzschock kommt dazu";
   };
-  method.addEventListener("change", paintNursery);
-  potCont.addEventListener("change", paintNursery);
+  // Übliche Anbauart gewechselt: Die Werte bleiben bei ihrer Anbauart – was bisher üblich war, wird zur anderen.
+  let usualBefore = method.value;
+  method.addEventListener("change", () => {
+    const before = typed(usualBefore);
+    const now = cropFor(before, method.value);
+    usualBefore = method.value;
+    altDays.value = before.field_days || "";
+    altRow.value = now.row_spacing !== before.row_spacing ? before.row_spacing : "";
+    altPlant.value = now.plant_spacing !== before.plant_spacing ? before.plant_spacing : "";
+    fieldDays.value = now.field_days;
+    rowSp.value = now.row_spacing;
+    plantSp.value = now.plant_spacing;
+    if (method.value === "transplant" && !(num(nursery.value) > 0)) nursery.value = now.nursery_days;
+    alt.checked = true;
+    paintNursery();
+  });
+  for (const el of [alt, potCont]) el.addEventListener("change", paintNursery);
+  for (const el of [nursery, fieldDays]) el.addEventListener("input", paintNursery);
   paintNursery();
 
   const feed = cropFeedFields(c);
@@ -642,16 +710,24 @@ export function openCropEditor(crop) {
         family: family.value.trim(),
         color: color.value,
         method: method.value,
-        nursery_days: intOf(nursery, "Anzucht"),
+        nursery_days: Math.round(num(nursery.value) ?? 0),
         field_days: intOf(fieldDays, "Tage bis zur Ernte"),
         harvest_days: intOf(harvest, "Erntedauer"),
         row_spacing: intOf(rowSp, "Reihenabstand", 1),
         plant_spacing: intOf(plantSp, "Pflanzabstand", 1),
         notes: notes.value,
         trait_group: traitGroup.value,
+        alt: alt.checked,
+        alt_field_days: Math.round(num(altDays.value) ?? 0),
+        alt_row_spacing: Math.round(num(altRow.value) ?? 0),
+        alt_plant_spacing: Math.round(num(altPlant.value) ?? 0),
         ...feed.value(),
       };
-      if (method.value === "transplant") {
+      if ([payload.alt_field_days, payload.alt_row_spacing, payload.alt_plant_spacing].some((v) => !(v >= 0))) {
+        throw new Error(`${altLegend.textContent}: bitte Zahlen ab 0 eingeben oder die Felder leer lassen`);
+      }
+      if (canTransplant()) {
+        if (!(payload.nursery_days > 0)) payload.nursery_days = 28; // ohne Angabe vier Wochen Anzucht
         Object.assign(payload, {
           sow_container_id: Number(sowCont.value), pot_container_id: Number(potCont.value),
           prick_days: intOf(prickDays, "Pikieren nach"), seeds_per_cell: intOf(seedsPer, "Körner je Zelle", 1),
@@ -669,16 +745,15 @@ export function openCropEditor(crop) {
 
   ui.body.append(
     h("div", { class: "grid-2" }, field("Name", name), field("Pflanzenfamilie", family, "Wird für die Fruchtfolge-Prüfung genutzt"), famList),
-    h("div", { class: "grid-2" }, field("Farbe", color), field("Übliche Anbauart", method)),
+    h("div", { class: "grid-2" }, field("Farbe", color),
+      h("div", { class: "field" }, h("span", {}, "Übliche Anbauart"), method, h("label", { class: "check" }, alt, altLabel))),
     h("fieldset", {},
       h("legend", {}, "Kulturdauer in Tagen"),
-      h("div", { class: "grid-3" },
-        field("Anzucht", nursery, "Aussaat bis Pflanzung"),
-        field("Bis zur Ernte", fieldDays, "ab Pflanzung bzw. Direktsaat"),
-        field("Erntedauer", harvest))),
+      h("div", { class: "grid-3" }, nurseryField, fieldDaysField, field("Erntedauer", harvest))),
     h("fieldset", {},
       h("legend", {}, "Abstände in cm"),
       h("div", { class: "grid-2" }, field("Reihenabstand", rowSp), field("Pflanzabstand in der Reihe", plantSp))),
+    altBox,
     nurseryBox,
     feed.el,
     field("Bonitur-Merkmale", traitGroup, "Welche Merkmale die Bonitur für diese Kultur anbietet"),
@@ -874,7 +949,7 @@ export function openSettings() {
     feeding.el,
     field("Anbaupause für die Fruchtfolge (Jahre)", years,
       "Gleiche Pflanzenfamilie an gleicher Stelle innerhalb dieser Zeit wird markiert. 0 schaltet die Prüfung ab."),
-    baserowSection(() => ui.dlg.close()),
+    baserowSection(),
     researchSection(),
     h("fieldset", {},
       h("legend", {}, "Sicherung"),
@@ -901,16 +976,6 @@ function nextBedName(kind) {
   let n = state.beds.filter((b) => b.kind === kind).length + 1;
   while (taken.has(`${base} ${n}`)) n += 1;
   return `${base} ${n}`;
-}
-
-export async function createBedAt(kind, cx, cy) {
-  const [length, width] = DEFAULT_BED_SIZE[kind] || DEFAULT_BED_SIZE.bed;
-  const gw = Number(state.settings.garden_width || 16);
-  const gh = Number(state.settings.garden_height || 11);
-  return createBedRect(kind,
-    round2(clamp(cx - length / 2, 0, Math.max(0, gw - length))),
-    round2(clamp(cy - width / 2, 0, Math.max(0, gh - width))),
-    length, width);
 }
 
 // Neue Fläche mit Lage und Größe in Metern (links oben, ungedreht)

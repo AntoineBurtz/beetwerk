@@ -17,14 +17,14 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import baserow, bonitur, db, feeding, geo, goals, nursery, profile, research, varieties, weather
+from . import baserow, bonitur, db, feeding, geo, goals, methods, nursery, profile, research, varieties, weather
 from .seed import guess_trait_groups, seed_demo
 
 VERSION = "1.1.0"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 IMAGE_PATH = db.DATA_DIR / "imagery" / "garden.jpg"
 INTERNAL_SETTINGS = {"geo", "imagery_custom", bonitur.SEEDED_KEY, profile.MIGRATED_KEY, nursery.SEEDED_KEY,
-                     feeding.SEEDED_KEY, feeding.HERBS_KEY, *weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
+                     feeding.SEEDED_KEY, feeding.HERBS_KEY, methods.SEEDED_KEY, *weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
 # Nicht in die Sicherung: Abrufzustand und Zugangsdaten
 NOT_EXPORTED = {*weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
 
@@ -126,6 +126,11 @@ class CropIn(BaseModel):
     harden_days: Optional[int] = Field(None, ge=0, le=60)
     place_id: Optional[int] = Field(None, ge=0)
     grow_place_id: Optional[int] = Field(None, ge=0)
+    # die andere Anbauart (Direktsaat statt Voranzucht oder umgekehrt); 0 = geschätzt bzw. wie üblich
+    alt: Optional[bool] = None
+    alt_field_days: Optional[int] = Field(None, ge=0, le=400)
+    alt_row_spacing: Optional[int] = Field(None, ge=0, le=300)
+    alt_plant_spacing: Optional[int] = Field(None, ge=0, le=300)
     # Düngung
     feed: Optional[Literal["", "none", "low", "medium", "high"]] = None
     feed_n: Optional[float] = Field(None, ge=0, le=60)       # eigene Menge in g N/m², 0 = Menge der Stufe
@@ -241,7 +246,8 @@ class ImageIn(BaseModel):
 BED_DEFAULTS = dict(name="Neues Beet", kind="bed", x=1.0, y=1.0, length=4.0, width=1.2, rotation=0.0, sort=0, notes="")
 CROP_DEFAULTS = dict(name="Neue Kultur", family="", color="#6a9b3c", method="direct", nursery_days=0,
                      field_days=60, harvest_days=21, row_spacing=30, plant_spacing=30, notes="", trait_group="",
-                     feed="", feed_n=0, feed_cut=0, feed_start=0, feed_late=0, feed_src="")
+                     feed="", feed_n=0, feed_cut=0, feed_start=0, feed_late=0, feed_src="",
+                     alt=0, alt_field_days=0, alt_row_spacing=0, alt_plant_spacing=0)
 PLANTING_DEFAULTS = dict(variety="", bed_id=None, method="direct", plant_date=None, start=0.0, len=1.0,
                          offset=0.0, span=None, rows=None, row_spacing=None, plant_spacing=None,
                          sown_done=False, planted_done=False, harvest_done=False, notes="",
@@ -472,7 +478,7 @@ def delete_bed(bed_id: int):
 
 def _crop_refs(conn, record: dict) -> dict:
     """Gefäße und Plätze der Anzucht: 0 heißt keins, sonst muss es sie geben."""
-    for k in ("warm", "feed_cut", "feed_late"):
+    for k in ("warm", "feed_cut", "feed_late", "alt"):
         if k in record:
             record[k] = int(bool(record[k]))
     for k, table, what in (("sow_container_id", "containers", "Dieses Gefäß"), ("pot_container_id", "containers", "Dieses Gefäß"),
@@ -675,7 +681,9 @@ async def import_all(request: Request):
             guess_trait_groups(conn)  # ältere Sicherung ohne Bonitur-Zuordnung
         bonitur.import_tables(conn, data)
         profile.migrate_legacy(conn)  # ältere Sicherung mit Wuchs, Fruchtfarbe und Reife als Freitext
-        nursery.seed(conn)  # ältere Sicherung ohne Anzucht: Gefäße und Richtwerte
+        fresh = methods.after_import(conn, data)  # ältere Sicherung: welche Kulturen beide Anbauarten haben
+        nursery.seed(conn)
+        nursery.assign_defaults(conn, fresh)  # ältere Sicherung ohne Anzucht: Gefäße und Richtwerte
         feeding.import_tables(conn, data)  # Düngerliste; ältere Sicherung ohne Düngung: Stufen nach dem Namen
         for key, value in {**db.DEFAULT_SETTINGS, **keep}.items():
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
