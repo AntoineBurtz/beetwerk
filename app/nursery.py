@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
-from . import bonitur, db, methods
+from . import bonitur, db, foils, methods
 
 router = APIRouter()
 
@@ -199,17 +199,13 @@ def clear_tables(conn) -> None:
 
 # ---------------------------------------------------------------- Rechnen
 
-def plant_count(p: dict, crop: dict, bed: Optional[dict]) -> int:
-    from .baserow import plant_count as count  # gleiche Rechnung wie die Oberfläche
-    return count(p, crop, bed)
-
-
-def _parts(p: dict, crop: dict, bed: Optional[dict]) -> list[tuple[str, int]]:
+def _parts(p: dict, crop: dict, bed: Optional[dict], grids: Optional[dict] = None) -> list[tuple[str, int]]:
     """Sorten eines Satzes mit Pflanzenzahl."""
     mixed = bonitur._loads(p.get("varieties"), []) or []
     if mixed:
         return [(str(v.get("name") or ""), int(v.get("count") or 0)) for v in mixed]
-    return [(p["variety"] or "", plant_count(p, crop, bed))]
+    lay = foils.layout(p, crop, bed, grids)  # gleiche Rechnung wie die Oberfläche
+    return [(p["variety"] or "", lay["rows"] * lay["per_row"])]
 
 
 def _ok_share(germination: float, k: int) -> float:
@@ -251,6 +247,7 @@ def _crop_view(c: dict) -> dict:
 def plan(conn, year: Optional[int] = None) -> dict:
     crops = {c["id"]: c for c in db.rows(conn, "SELECT * FROM crops")}
     beds = {b["id"]: b for b in db.rows(conn, "SELECT * FROM beds")}
+    grids = foils.by_id(conn)
     containers = {c["id"]: c for c in db.rows(conn, "SELECT * FROM containers ORDER BY sort, id")}
     places = {p["id"]: p for p in db.rows(conn, "SELECT * FROM places ORDER BY sort, id")}
     people = {p["id"]: p for p in db.rows(conn, "SELECT * FROM people ORDER BY name COLLATE NOCASE")}
@@ -273,7 +270,7 @@ def plan(conn, year: Optional[int] = None) -> dict:
         if crop is None:
             continue
         bed = beds.get(p["bed_id"])
-        for variety, count in _parts(p, crop, bed):
+        for variety, count in _parts(p, crop, bed, grids):
             if count <= 0:
                 continue
             b = batch(crop, variety, p["sow_date"])

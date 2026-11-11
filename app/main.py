@@ -17,14 +17,14 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import baserow, bonitur, db, feeding, geo, goals, methods, nursery, profile, research, varieties, weather
+from . import baserow, bonitur, db, feeding, foils, geo, goals, methods, nursery, profile, research, varieties, weather
 from .seed import guess_trait_groups, seed_demo
 
 VERSION = "1.1.0"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 IMAGE_PATH = db.DATA_DIR / "imagery" / "garden.jpg"
 INTERNAL_SETTINGS = {"geo", "imagery_custom", bonitur.SEEDED_KEY, profile.MIGRATED_KEY, nursery.SEEDED_KEY,
-                     feeding.SEEDED_KEY, feeding.HERBS_KEY, methods.SEEDED_KEY, *weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
+                     feeding.SEEDED_KEY, feeding.HERBS_KEY, methods.SEEDED_KEY, foils.SEEDED_KEY, *weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
 # Nicht in die Sicherung: Abrufzustand und Zugangsdaten
 NOT_EXPORTED = {*weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
 
@@ -101,6 +101,7 @@ class BedIn(BaseModel):
     rotation: Optional[float] = None
     sort: Optional[int] = None
     notes: Optional[str] = None
+    foil_id: Optional[int] = Field(None, ge=0)  # Folien-Vorlage auf dem Beet; 0 oder null = keine
 
 
 class CropIn(BaseModel):
@@ -131,6 +132,7 @@ class CropIn(BaseModel):
     alt_field_days: Optional[int] = Field(None, ge=0, le=400)
     alt_row_spacing: Optional[int] = Field(None, ge=0, le=300)
     alt_plant_spacing: Optional[int] = Field(None, ge=0, le=300)
+    foil: Optional[bool] = None  # passt ins Raster einer Lochfolie; ohne Angabe nach dem Pflanzabstand
     # Düngung
     feed: Optional[Literal["", "none", "low", "medium", "high"]] = None
     feed_n: Optional[float] = Field(None, ge=0, le=60)       # eigene Menge in g N/m², 0 = Menge der Stufe
@@ -179,6 +181,7 @@ class PlantingIn(BaseModel):
     fill: Optional[Literal["snake", "columns"]] = None
     fill_start: Optional[Literal["tl", "tr", "bl", "br"]] = None
     no_feed: Optional[bool] = None                           # diesen Satz nicht düngen
+    foil_id: Optional[int] = Field(None, ge=0)               # Pflanzraster: null wie das Beet, 0 ohne Folie, sonst Vorlage
     fed: Optional[dict[str, str]] = Field(None, max_length=20)  # erledigte Düngergaben: Nummer der Gabe -> Datum
 
     @field_validator("sow_date", "plant_date", "harvest_start", "harvest_end")
@@ -251,7 +254,7 @@ CROP_DEFAULTS = dict(name="Neue Kultur", family="", color="#6a9b3c", method="dir
 PLANTING_DEFAULTS = dict(variety="", bed_id=None, method="direct", plant_date=None, start=0.0, len=1.0,
                          offset=0.0, span=None, rows=None, row_spacing=None, plant_spacing=None,
                          sown_done=False, planted_done=False, harvest_done=False, notes="",
-                         varieties="", fill="snake", fill_start="tl", no_feed=False, fed="")
+                         varieties="", fill="snake", fill_start="tl", no_feed=False, fed="", foil_id=None)
 
 
 def _err(status: int, message: str):
@@ -391,15 +394,26 @@ def all_data():
             **nursery.lists(conn),
             **goals.lists(conn),
             **feeding.lists(conn),
+            **foils.lists(conn),
         }
 
 
 # ---------------------------------------------------------------- Beete
 
+def _foil_ref(conn, foil_id: Optional[int]) -> Optional[int]:
+    """Folie eines Beets: 0 und null heißen keine, sonst muss es die Vorlage geben."""
+    if not foil_id:
+        return None
+    if conn.execute("SELECT 1 FROM foils WHERE id = ?", (foil_id,)).fetchone() is None:
+        _err(422, "Diese Folien-Vorlage gibt es nicht")
+    return foil_id
+
+
 @app.post("/api/beds", status_code=201)
 def create_bed(body: BedIn):
     record = {**BED_DEFAULTS, **body.model_dump(exclude_unset=True, exclude_none=True)}
     with db.session() as conn:
+        record["foil_id"] = _foil_ref(conn, record.get("foil_id"))
         if "sort" not in body.model_fields_set:
             record["sort"] = conn.execute("SELECT COALESCE(MAX(sort), -1) + 1 FROM beds").fetchone()[0]
         width = db.uniform_width(conn)
@@ -413,7 +427,11 @@ def create_bed(body: BedIn):
 def update_bed(bed_id: int, body: BedIn):
     changes = body.model_dump(exclude_unset=True, exclude_none=True)
     with db.session() as conn:
-        _get(conn, "beds", bed_id)
+        before = _get(conn, "beds", bed_id)
+        if "foil_id" in body.model_fields_set:
+            changes["foil_id"] = _foil_ref(conn, body.foil_id)
+            if changes["foil_id"] != before["foil_id"]:
+                foils.pin_past(conn, bed_id, before["foil_id"])  # abgeerntete Sätze behalten ihr Raster
         _update(conn, "beds", bed_id, changes)
         bed = _get(conn, "beds", bed_id)
         width = db.uniform_width(conn)
@@ -478,7 +496,7 @@ def delete_bed(bed_id: int):
 
 def _crop_refs(conn, record: dict) -> dict:
     """Gefäße und Plätze der Anzucht: 0 heißt keins, sonst muss es sie geben."""
-    for k in ("warm", "feed_cut", "feed_late", "alt"):
+    for k in ("warm", "feed_cut", "feed_late", "alt", "foil"):
         if k in record:
             record[k] = int(bool(record[k]))
     for k, table, what in (("sow_container_id", "containers", "Dieses Gefäß"), ("pot_container_id", "containers", "Dieses Gefäß"),
@@ -494,6 +512,7 @@ def _crop_refs(conn, record: dict) -> dict:
 @app.post("/api/crops", status_code=201)
 def create_crop(body: CropIn):
     record = {**CROP_DEFAULTS, **body.model_dump(exclude_unset=True, exclude_none=True)}
+    record.setdefault("foil", foils.fits(record))
     with db.session() as conn:
         _crop_refs(conn, record)
         new_id = _insert(conn, "crops", record)
@@ -685,6 +704,7 @@ async def import_all(request: Request):
         nursery.seed(conn)
         nursery.assign_defaults(conn, fresh)  # ältere Sicherung ohne Anzucht: Gefäße und Richtwerte
         feeding.import_tables(conn, data)  # Düngerliste; ältere Sicherung ohne Düngung: Stufen nach dem Namen
+        foils.import_tables(conn, data)  # Folien-Vorlagen; ältere Sicherung: Beispiele und wer ins Raster passt
         for key, value in {**db.DEFAULT_SETTINGS, **keep}.items():
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
     return all_data()
@@ -799,4 +819,5 @@ app.include_router(varieties.router)
 app.include_router(nursery.router)
 app.include_router(goals.router)
 app.include_router(feeding.router)
+app.include_router(foils.router)
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

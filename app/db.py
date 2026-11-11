@@ -229,7 +229,7 @@ def session():
 
 
 def init_db() -> None:
-    from . import feeding, goals, methods, nursery
+    from . import feeding, foils, goals, methods, nursery
     from .bonitur import seed_traits
     from .profile import migrate_legacy
     from .seed import guess_trait_groups, seed_crops
@@ -258,6 +258,7 @@ def init_db() -> None:
         nursery.assign_defaults(conn, fresh)
         goals.init(conn)
         feeding.init(conn)
+        foils.init(conn)
 
 
 # Spalten, die nach der ersten Version dazugekommen sind

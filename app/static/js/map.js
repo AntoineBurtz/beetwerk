@@ -1,7 +1,7 @@
 // Beetkarte: Grundstück mit Beeten, darauf die Sätze, die am Stichtag im Beet stehen.
 import { state, find, select, patch, remove, setDay, setMode, issuesOf, api, replaceAll } from "./store.js";
 import {
-  h, s, phases, onBedAt, rectOf, spanOf, rowCount, plantCount, plantLayout, spacing, mix, clamp, snap, round2,
+  h, s, phases, onBedAt, rectOf, spanOf, rowCount, plantCount, plantLayout, spacing, foilOf, mix, clamp, snap, round2,
   fmtDay, fmtNum, yearOf, yearStart, yearLength, MONTHS_SHORT, KIND_LABEL, PLANTABLE, isoOf, plural,
   isMixed, mixPlan, varietyColor, varietyMark, varietyText, textOn,
 } from "./util.js";
@@ -577,12 +577,12 @@ export function mountMap(root) {
   // Saatrillen einer geplanten Fläche: wo die Reihen liegen werden, in Beetrichtung
   function furrows(p, crop, bed, x, y, w, hh, color, k) {
     const g = s("g", { class: "plan-rows", "pointer-events": "none", stroke: mix(color, "#1d2b24", 0.25) });
-    const { along, rows } = plantLayout(p, crop, bed);
+    const { along, rows, rowAt } = plantLayout(p, crop, bed);
     const across = along === "x" ? hh : w;
     const step = Math.max(1, Math.ceil((7 * k * rows) / across)); // nicht dichter als alle 7 Pixel
     const inset = Math.min(7 * k, (along === "x" ? w : hh) / 6);
     for (let i = 0; i < rows; i += step) {
-      const c = (across * (i + 0.5)) / rows;
+      const c = across * rowAt(i);
       g.append(along === "x" ? s("line", { x1: x + inset, x2: x + w - inset, y1: y + c, y2: y + c })
         : s("line", { x1: x + c, x2: x + c, y1: y + inset, y2: y + hh - inset }));
     }
@@ -776,12 +776,12 @@ export function mountMap(root) {
 
   function drawPlants(p, crop, bed, x, y, w, hh, color, k) {
     const g = s("g", { "pointer-events": "none" });
-    const { along, rows, perRow, sp } = plantLayout(p, crop, bed);
+    const { along, rows, perRow, sp, rowAt } = plantLayout(p, crop, bed);
     const dark = mix(color, "#1d2b24", 0.1);
     // Position von Reihe i, Pflanze j; Reihen laufen in Beetrichtung (along = "x": entlang der Beetlänge)
     const at = (i, j) => (along === "x"
-      ? [x + (w * (j + 0.5)) / perRow, y + (hh * (i + 0.5)) / rows]
-      : [x + (w * (i + 0.5)) / rows, y + (hh * (j + 0.5)) / perRow]);
+      ? [x + (w * (j + 0.5)) / perRow, y + hh * rowAt(i)]
+      : [x + w * rowAt(i), y + (hh * (j + 0.5)) / perRow]);
     if (isMixed(p) && rows * perRow <= 3000) {
       // Mischsatz: jede Pflanze in der Farbe ihrer Sorte, mit Kürzel wenn genug Platz
       const plan = mixPlan(p, crop, bed);
@@ -1522,7 +1522,8 @@ export function mountMap(root) {
     const ph = phases(p);
     const day = state.day;
     const issues = issuesOf(p.id);
-    const sp = spacing(p, crop);
+    const sp = spacing(p, crop, bed);
+    const foil = foilOf(p, crop, bed);
     let status;
     if (day < ph.sow) status = `Aussaat in ${ph.sow - day} Tagen`;
     else if (ph.plant != null && day < ph.plant) status = `In Anzucht, Pflanzung in ${ph.plant - day} Tagen`;
@@ -1543,7 +1544,7 @@ export function mountMap(root) {
       h("dt", {}, "Pflanzen"), h("dd", {}, isMixed(p)
         ? `${mixPlan(p, crop, bed).total} auf ${plantCount(p, crop, bed)} Plätzen in ${plural(rowCount(p, crop, bed), "Reihe", "Reihen")}`
         : `${plantCount(p, crop, bed)} in ${plural(rowCount(p, crop, bed), "Reihe", "Reihen")}`),
-      h("dt", {}, "Abstände"), h("dd", {}, `${sp.row} × ${sp.plant} cm`),
+      h("dt", {}, "Abstände"), h("dd", {}, `${sp.row} × ${sp.plant} cm${foil ? ` (${foil.name})` : ""}`),
       h("dt", {}, "Aussaat"), h("dd", {}, fmtDay(ph.sow, { year: true })),
       ph.plant != null ? h("dt", {}, "Pflanzung") : null, ph.plant != null ? h("dd", {}, fmtDay(ph.plant, { year: true })) : null,
       h("dt", {}, "Ernte"), h("dd", {}, `${fmtDay(ph.hs)} bis ${fmtDay(ph.he, { year: true })}`),

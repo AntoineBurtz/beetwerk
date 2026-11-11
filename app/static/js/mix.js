@@ -312,7 +312,7 @@ export function mixEditor(initial, { context, datalistId, onChange, onFitLength 
     capLine.classList.toggle("muted", !plan.overflow);
 
     // Länge so anpassen, dass alle Pflanzen genau Platz haben
-    const sp = spacing(p, crop);
+    const sp = spacing(p, crop, bed);
     const spanM = spanOf(p, bed);
     const layout = plantLayout(p, crop, bed);
     const across = layout.along === "x" ? layout.rows : (p.rows || Math.max(1, Math.floor((spanM * 100 + 0.5) / sp.row)));

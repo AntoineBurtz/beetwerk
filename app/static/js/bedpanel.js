@@ -1,7 +1,7 @@
 // Übersicht eines Beets in der Seitenleiste (Karte, Zeitleiste): Eckdaten, Belegung und Fruchtfolge.
 import { state, find } from "./store.js";
 import {
-  h, phases, mix, clamp, fmtDay, fmtNum, yearOf, yearStart, yearLength, KIND_LABEL, PLANTABLE, varietyText,
+  h, phases, mix, clamp, fmtDay, fmtNum, yearOf, yearStart, yearLength, KIND_LABEL, PLANTABLE, varietyText, foilById, foilLabel,
 } from "./util.js";
 import { icon } from "./ui.js";
 import { bedFeedLine } from "./feedui.js";
@@ -15,6 +15,7 @@ export function bedSummary(bed, { actions = [], onClose } = {}) {
         icon("close")) : null),
     h("p", { class: "muted", style: { margin: 0 } },
       `${KIND_LABEL[bed.kind]} · ${fmtNum(bed.length, 2)} × ${fmtNum(bed.width, 2)} m · ${fmtNum(bed.length * bed.width)} m²`),
+    foilById(bed.foil_id) ? h("p", { class: "muted", style: { margin: 0 } }, foilLabel(foilById(bed.foil_id))) : null,
     bed.notes ? h("p", { class: "small", style: { margin: 0, whiteSpace: "pre-wrap" } }, bed.notes) : null,
     actions.length ? h("div", { class: "actions" }, actions) : null);
 }

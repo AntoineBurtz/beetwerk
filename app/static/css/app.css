@@ -1605,5 +1605,6 @@ table.goal-table tr.cold td { color: var(--ink-3); }
 .feed-detail { display: grid; gap: 10px; }
 .fert-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .fert-list .chip { cursor: pointer; }
+.foil-beds { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 14px; max-height: 220px; overflow: auto; }
 .chip.chip-add { border-style: dashed; color: var(--ink-2); }
 dialog.wide { width: min(860px, calc(100vw - 24px)); }
