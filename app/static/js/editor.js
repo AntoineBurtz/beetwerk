@@ -2,7 +2,7 @@
 import { state, find, create, patch, remove, issuesOf, api, replaceAll, select, emit, setMode, setDay, load } from "./store.js";
 import {
   h, dayNum, isoOf, datesFromCrop, cropFor, otherMethod, rowCount, plantCount, spanOf, fmtNum, KIND_LABEL, PLANTABLE,
-  phases, rectOf, round2, clamp, plural, fmtDay, isMixed, varietyText, yearOf,
+  phases, rectOf, round2, clamp, plural, fmtDay, isMixed, varietyText, yearOf, foilOf, foilById, foilLabel, FOIL_MIN_PLANT,
 } from "./util.js";
 import { toast, confirmDialog, icon } from "./ui.js";
 import { mixEditor } from "./mix.js";
@@ -12,6 +12,7 @@ import { baserowSection } from "./baserowsetup.js";
 import { researchSection } from "./researchsetup.js";
 import { openGoalEditor } from "./goals.js";
 import { cropFeedFields, feedSettings } from "./feedui.js";
+import { foilSettings, bedFoilSelect } from "./foilui.js";
 
 export function shell(title, { onSubmit, extraHead } = {}) {
   const dlg = h("dialog");
@@ -229,6 +230,11 @@ export function openPlantingEditor(planting, defaults = {}) {
   const plantSp = h("input", { name: "plant_spacing", inputmode: "numeric", value: p.plant_spacing ?? "" });
   const rows = h("input", { name: "rows", inputmode: "numeric", value: p.rows ?? "", placeholder: "automatisch" });
   const calc = h("p", { class: "calc", style: { margin: 0 } });
+  // Pflanzraster: leer = wie das Beet, 0 = ohne Folie, sonst eine Vorlage
+  const foilSel = h("select", { name: "foil_id" });
+  const foilField = field("Pflanzraster", foilSel);
+  foilField.hidden = !state.foils.length;
+  const foilValue = () => (foilSel.value === "" ? null : Number(foilSel.value));
 
   const sown = h("input", { type: "checkbox", name: "sown_done", checked: !!p.sown_done });
   const planted = h("input", { type: "checkbox", name: "planted_done", checked: !!p.planted_done });
@@ -248,8 +254,18 @@ export function openPlantingEditor(planting, defaults = {}) {
     plantField.hidden = !isTp;
     plantedLabel.hidden = !isTp;
     const eff = cropFor(c, method()); // Dauer und Abstände der gewählten Anbauart
-    rowSp.placeholder = c ? `${eff.row_spacing} (Kultur)` : "";
-    plantSp.placeholder = c ? `${eff.plant_spacing} (Kultur)` : "";
+    // Auswahl des Rasters: was „wie das Beet“ gerade heißt, hängt von Beet und Kultur ab
+    const onBed = foilById(bed()?.foil_id);
+    const chosen = foilSel.options.length ? foilValue() : p.foil_id ?? null;
+    foilSel.replaceChildren(
+      h("option", { value: "", selected: chosen == null },
+        !bed() ? "ohne Beet: Abstände der Kultur" : !onBed ? "wie das Beet: keine Folie"
+          : c && c.foil === 0 ? `wie das Beet: ohne Folie – ${c.name} passt nicht ins Raster` : `wie das Beet: ${foilLabel(onBed)}`),
+      h("option", { value: 0, selected: chosen === 0 }, "ohne Folie: Abstände der Kultur"),
+      ...state.foils.map((f) => h("option", { value: f.id, selected: chosen === f.id }, foilLabel(f))));
+    const foil = c ? foilOf({ foil_id: foilValue() }, c, bed()) : null;
+    rowSp.placeholder = foil ? `${foil.row_spacing} (Folie)` : c ? `${eff.row_spacing} (Kultur)` : "";
+    plantSp.placeholder = foil ? `${foil.plant_spacing} (Folie)` : c ? `${eff.plant_spacing} (Kultur)` : "";
     methodNote.hidden = !c || method() === c.method;
     if (!methodNote.hidden) {
       methodNote.textContent = `${c.name} wird sonst ${c.method === "transplant" ? "vorgezogen" : "direkt gesät"}. `
@@ -275,7 +291,9 @@ export function openPlantingEditor(planting, defaults = {}) {
       const n = plantCount(draft, c, b);
       calc.replaceChildren(
         h("strong", {}, `${plural(rowCount(draft, c, b), "Reihe", "Reihen")}, ${mixed ? plural(n, "Platz", "Plätze") : plural(n, "Pflanze", "Pflanzen")}`),
-        ` auf ${fmtNum(draft.len)} × ${fmtNum(sp)} m (${fmtNum(draft.len * sp)} m²)`);
+        ` auf ${fmtNum(draft.len)} × ${fmtNum(sp)} m (${fmtNum(draft.len * sp)} m²)`,
+        foil && !draft.row_spacing && !draft.plant_spacing
+          ? ` · Raster ${foil.name}: ${foil.row_spacing} × ${foil.plant_spacing} cm statt ${eff.row_spacing} × ${eff.plant_spacing} cm der Kultur` : "");
     } else {
       calc.textContent = "";
     }
@@ -309,7 +327,7 @@ export function openPlantingEditor(planting, defaults = {}) {
 
   function currentDraft() {
     return {
-      method: method(),
+      method: method(), foil_id: foilValue(), start: num(start.value) ?? 0,
       len: num(len.value) ?? 0, offset: num(offset.value) ?? 0, span: num(span.value),
       rows: num(rows.value), row_spacing: num(rowSp.value), plant_spacing: num(plantSp.value),
     };
@@ -363,7 +381,7 @@ export function openPlantingEditor(planting, defaults = {}) {
   recalcBtn.addEventListener("click", () => recalc(false));
   let startTouched = !isNew;
   start.addEventListener("input", () => { startTouched = true; });
-  for (const el of [len, offset, span, rows, rowSp, plantSp, bedSel, start]) el.addEventListener("input", refresh);
+  for (const el of [len, offset, span, rows, rowSp, plantSp, bedSel, start, foilSel]) el.addEventListener("input", refresh);
 
   const cropName = find.crop(p.crop_id)?.name ?? "Satz";
   const title = isNew ? "Neuer Satz"
@@ -401,6 +419,7 @@ export function openPlantingEditor(planting, defaults = {}) {
       rows: draft.rows && draft.rows >= 1 ? Math.round(draft.rows) : null,
       row_spacing: draft.row_spacing ? Math.round(draft.row_spacing) : null,
       plant_spacing: draft.plant_spacing ? Math.round(draft.plant_spacing) : null,
+      foil_id: draft.foil_id,
       sown_done: sown.checked,
       planted_done: m === "transplant" ? planted.checked : false,
       harvest_done: harvested.checked,
@@ -470,6 +489,7 @@ export function openPlantingEditor(planting, defaults = {}) {
       h("legend", {}, "Platz im Beet"),
       h("div", { class: "grid-4" },
         field("Start (m)", start), field("Länge (m)", len), field("Abstand zum Rand (m)", offset), field("Breite (m)", span)),
+      foilField,
       h("div", { class: "grid-3" },
         field("Reihenabstand (cm)", rowSp), field("Pflanzabstand (cm)", plantSp), field("Reihen", rows)),
       calc),
@@ -535,6 +555,8 @@ export function openBedEditor(bed, defaults = {}) {
   const x = h("input", { name: "x", inputmode: "decimal", value: fmtInput(b.x) });
   const y = h("input", { name: "y", inputmode: "decimal", value: fmtInput(b.y) });
   const notes = h("textarea", { name: "notes" }, b.notes || "");
+  const foilSel = bedFoilSelect(b);
+  const foilField = field("Folie mit Pflanzraster", foilSel, "Sätze auf dem Beet rechnen mit dem Raster der Folie. Vorlagen stehen in den Einstellungen.");
 
   const ui = shell(isNew ? "Neues Beet" : b.name, {
     onSubmit: async () => {
@@ -548,6 +570,9 @@ export function openBedEditor(bed, defaults = {}) {
         y: num(y.value) ?? 0,
         notes: notes.value,
       };
+      const foilId = PLANTABLE.has(kind.value) ? Number(foilSel.value) || null : null;
+      const foilChanged = foilId !== (b.foil_id ?? null);
+      if (isNew ? foilId : foilChanged) payload.foil_id = foilId;
       if (!payload.name) throw new Error("Bitte einen Namen eingeben");
       if (!(payload.length > 0) || !(payload.width > 0)) throw new Error("Länge und Breite müssen größer als 0 sein");
       if (isNew) {
@@ -555,6 +580,7 @@ export function openBedEditor(bed, defaults = {}) {
         select({ type: "bed", id: item.id });
       } else {
         await patch("beds", b.id, payload, { undoLabel: "Beet gespeichert", silent: true });
+        if (foilChanged) await load(); // abgeerntete Sätze haben ihr bisheriges Raster behalten
       }
     },
   });
@@ -564,10 +590,13 @@ export function openBedEditor(bed, defaults = {}) {
     h("div", { class: "grid-3" }, field("Länge (m)", length), h("label", { class: "field" }, h("span", {}, "Breite (m)"), width, widthHint),
       field("Drehung (°)", rotation)),
     h("div", { class: "grid-2" }, field("Position links (m)", x), field("Position oben (m)", y)),
+    foilField,
     field("Notizen", notes, "Zum Beispiel Bodenart, Bewässerung oder Mulch"),
   );
-  kind.addEventListener("change", syncWidth);
+  const syncFoil = () => { foilField.hidden = !state.foils.length || !PLANTABLE.has(kind.value); };
+  kind.addEventListener("change", () => { syncWidth(); syncFoil(); });
   syncWidth();
+  syncFoil();
   ui.foot.append(
     isNew ? null : h("button", {
       type: "button", class: "btn btn-danger", onclick: async () => {
@@ -619,6 +648,11 @@ export function openCropEditor(crop) {
   const harvest = h("input", { name: "harvest_days", inputmode: "numeric", value: c.harvest_days });
   const rowSp = h("input", { name: "row_spacing", inputmode: "numeric", value: c.row_spacing });
   const plantSp = h("input", { name: "plant_spacing", inputmode: "numeric", value: c.plant_spacing });
+  // passt ins Raster einer Lochfolie: Vorschlag nach dem Pflanzabstand, bis der Haken von Hand gesetzt wird
+  const fitsFoil = h("input", { type: "checkbox", checked: isNew ? c.plant_spacing >= FOIL_MIN_PLANT : c.foil !== 0 });
+  let foilTouched = !isNew;
+  fitsFoil.addEventListener("change", () => { foilTouched = true; });
+  plantSp.addEventListener("input", () => { if (!foilTouched) fitsFoil.checked = (num(plantSp.value) ?? 0) >= FOIL_MIN_PLANT; });
   const notes = h("textarea", { name: "notes" }, c.notes || "");
   const traitGroup = h("select", { name: "trait_group" },
     [["", "nur allgemeine Merkmale"], ["tomato", "Tomate"], ["pepper", "Paprika und Chili"]]
@@ -721,6 +755,7 @@ export function openCropEditor(crop) {
         alt_field_days: Math.round(num(altDays.value) ?? 0),
         alt_row_spacing: Math.round(num(altRow.value) ?? 0),
         alt_plant_spacing: Math.round(num(altPlant.value) ?? 0),
+        foil: fitsFoil.checked,
         ...feed.value(),
       };
       if ([payload.alt_field_days, payload.alt_row_spacing, payload.alt_plant_spacing].some((v) => !(v >= 0))) {
@@ -752,7 +787,10 @@ export function openCropEditor(crop) {
       h("div", { class: "grid-3" }, nurseryField, fieldDaysField, field("Erntedauer", harvest))),
     h("fieldset", {},
       h("legend", {}, "Abstände in cm"),
-      h("div", { class: "grid-2" }, field("Reihenabstand", rowSp), field("Pflanzabstand in der Reihe", plantSp))),
+      h("div", { class: "grid-2" }, field("Reihenabstand", rowSp), field("Pflanzabstand in der Reihe", plantSp)),
+      h("label", { class: "check" }, fitsFoil, "passt ins Raster einer Lochfolie"),
+      h("p", { class: "muted small", style: { margin: 0 } },
+        "Mit Haken rechnen Sätze auf einem Beet mit Folie mit deren Raster. Ohne Haken (Radieschen, Möhren und andere mit engem Abstand in der Reihe) gelten die Abstände hier.")),
     altBox,
     nurseryBox,
     feed.el,
@@ -945,6 +983,7 @@ export function openSettings() {
         "Gleich breite Beete: Jedes neue Beet bekommt diese Breite, auf der Karte änderst du nur noch die Länge. "
         + "Gilt für Flächen der Art „Beet“; Hochbeete, Gewächshäuser und Wege behalten eigene Maße. "
         + "Die Pflanzreihen laufen in jedem Beet entlang der langen Seite, nie quer.")),
+    foilSettings(),
     weatherSection,
     feeding.el,
     field("Anbaupause für die Fruchtfolge (Jahre)", years,

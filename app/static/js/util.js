@@ -127,28 +127,77 @@ export function cropFor(crop, method) {
 export const otherMethod = (method) => (method === "transplant" ? "direct" : "transplant");
 export const METHOD_LABEL = { direct: "Direktsaat", transplant: "Voranzucht" };
 
-// Abstände eines Satzes: seine eigenen, sonst die der Kultur in seiner Anbauart
-export function spacing(p, crop) {
+// Folien-Vorlagen: Pflanzraster von Gewebefolie mit Löchern (Reihen, Reihenabstand, Abstand in der Reihe).
+// Die Liste liefert der Store (useFoils), damit util.js ohne ihn auskommt – gleiche Rechnung wie foils.py.
+let foilList = () => [];
+export function useFoils(getter) {
+  foilList = getter;
+}
+export const foilById = (id) => foilList().find((f) => f.id === id) ?? null;
+export const foilLabel = (f) => `${f.name} (${plural(f.rows, "Reihe", "Reihen")}, ${f.row_spacing} × ${f.plant_spacing} cm)`;
+export const FOIL_MIN_PLANT = 15; // cm; Kulturen mit engerem Abstand in der Reihe passen nicht ins Raster
+
+// Die Folie, deren Raster für den Satz gilt: die des Satzes (foil_id; 0 = ohne Folie), sonst die des Beets –
+// außer die Kultur passt nicht ins Raster.
+export function foilOf(p, crop, bed) {
+  if (p.foil_id) return foilById(p.foil_id);
+  if (p.foil_id === 0 || !bed?.foil_id) return null;
+  if (crop && crop.foil === 0) return null;
+  return foilById(bed.foil_id);
+}
+
+// Lage der Folienreihen im Streifen start … start + span (Meter quer zur Reihe, ab Streifenanfang).
+// Die Folie liegt mittig auf der Breite total. Eine Reihe genau auf der Grenze zählt zum hinteren Streifen.
+export function foilRows(foil, total, start, span) {
+  const step = foil.row_spacing / 100;
+  const first = (total - (foil.rows - 1) * step) / 2;
+  const end = start + span;
+  const toEdge = end >= total - 0.005;
+  const out = [];
+  for (let i = 0; i < foil.rows; i++) {
+    const pos = first + i * step;
+    if (pos >= start - 0.005 && (pos < end - 0.005 || (toEdge && pos <= total + 0.005))) out.push(pos - start);
+  }
+  return out;
+}
+
+// Abstände eines Satzes: seine eigenen, sonst das Raster der Folie, sonst die der Kultur in seiner Anbauart
+export function spacing(p, crop, bed) {
   const c = cropFor(crop, p.method);
+  const foil = foilOf(p, crop, bed);
   return {
-    row: p.row_spacing || c?.row_spacing || 30,
-    plant: p.plant_spacing || c?.plant_spacing || 30,
+    row: p.row_spacing || foil?.row_spacing || c?.row_spacing || 30,
+    plant: p.plant_spacing || foil?.plant_spacing || c?.plant_spacing || 30,
   };
 }
 
 // Pflanzbild: Reihen laufen immer in Beetrichtung, also entlang der langen Beetseite – nie quer,
 // auch wenn der Satz selbst breiter als lang ist. Ohne Beet entlang der Länge des Satzes.
 // along = "x": Reihen entlang der Beetlänge, sonst entlang der Beetbreite (Beet breiter als lang).
+// rowAt(i): Lage der Reihe i quer zur Reihe als Anteil 0…1 – gleichmäßig verteilt oder wie die Löcher der Folie.
 export function plantLayout(p, crop, bed) {
-  const sp = spacing(p, crop);
+  const sp = spacing(p, crop, bed);
+  const foil = foilOf(p, crop, bed);
   const lenM = p.len;
   const spanM = spanOf(p, bed);
   const along = bed && bed.length < bed.width ? "y" : "x";
   const longM = along === "x" ? lenM : spanM;
   const shortM = along === "x" ? spanM : lenM;
-  const rows = p.rows || Math.max(1, Math.floor((shortM * 100 + 0.5) / sp.row));
+  let rows, holes = null;
+  if (p.rows) {
+    rows = p.rows;
+  } else if (foil && !p.row_spacing) {
+    const total = bed ? (along === "x" ? bed.width : bed.length) : shortM;
+    const at = bed ? (along === "x" ? p.offset || 0 : p.start || 0) : 0;
+    const pos = foilRows(foil, total, at, shortM);
+    rows = Math.max(1, pos.length);
+    if (pos.length) holes = pos.map((m) => clamp(m / shortM, 0.04, 0.96));
+  } else {
+    rows = Math.max(1, Math.floor((shortM * 100 + 0.5) / sp.row));
+  }
   const perRow = Math.max(1, Math.floor((longM * 100 + 0.5) / sp.plant));
-  return { along, rows, perRow, sp };
+  const rowAt = (i) => (holes ? holes[i] : (i + 0.5) / rows);
+  return { along, rows, perRow, sp, foil, rowAt };
 }
 
 export function rowCount(p, crop, bed) {

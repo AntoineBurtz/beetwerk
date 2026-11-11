@@ -1,5 +1,5 @@
 // Zentraler Zustand: Daten vom Server, Stichtag, Auswahl. Änderungen laufen optimistisch.
-import { analyse, todayNum } from "./util.js";
+import { analyse, todayNum, useFoils } from "./util.js";
 import { toast } from "./ui.js";
 
 async function request(method, url, body) {
@@ -48,6 +48,7 @@ export const state = {
   handovers: [], // ihre Wünsche
   goals: [], // Ernteziele für Folgesätze
   fertilizers: [], // Düngerliste
+  foils: [], // Folien-Vorlagen (Pflanzraster)
   seriesOpen: new Set(), // Ernteziele, deren Sätze die Zeitleiste einzeln statt als Satzfolge zeigt
   marked: new Set(), // mehrere markierte Sätze (IDs) zum gemeinsamen Ändern oder Löschen
   day: initialDay(),
@@ -89,7 +90,9 @@ export const find = {
 };
 
 const LIST = { beds: "beds", crops: "crops", plantings: "plantings", varieties: "varieties",
-  containers: "containers", places: "places", people: "people", handovers: "handovers", fertilizers: "fertilizers" };
+  containers: "containers", places: "places", people: "people", handovers: "handovers", fertilizers: "fertilizers", foils: "foils" };
+
+useFoils(() => state.foils || []);
 
 export async function load() {
   const data = await api.get("/api/data");

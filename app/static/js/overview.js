@@ -5,7 +5,7 @@ import { state, api, find, subscribe, select, issuesOf, create, setDay, emit } f
 import {
   h, phases, fmtDay, fmtNum, plural, yearOf, yearStart, yearLength, isMixed, varietyText, plantCount, rowCount,
   spanOf, spacing, mixPlan, KIND_LABEL, PLANTABLE, isoWeek, dayNum, onBedAt, isoOf, monthStarts, MONTHS_SHORT,
-  cropFor, otherMethod, METHOD_LABEL,
+  cropFor, otherMethod, METHOD_LABEL, foilOf, foilById, foilLabel,
 } from "./util.js";
 import { icon, toast } from "./ui.js";
 import { shell, openCropEditor, openBedEditor, openPlantingEditor, followUp, goalSeries } from "./editor.js";
@@ -164,7 +164,8 @@ export function openCropOverview(crop0) {
         ["Kulturdauer", transplant
           ? `${c.nursery_days} Tage Anzucht, ${c.field_days} Tage im Beet bis zur Ernte, ${c.harvest_days} Tage Ernte`
           : `${c.field_days} Tage bis zur Ernte, ${c.harvest_days} Tage Ernte`],
-        ["Abstände", `${c.row_spacing} × ${c.plant_spacing} cm (${fmtNum(10000 / (c.row_spacing * c.plant_spacing))} Pflanzen je m²)`],
+        ["Abstände", `${c.row_spacing} × ${c.plant_spacing} cm (${fmtNum(10000 / (c.row_spacing * c.plant_spacing))} Pflanzen je m²)`
+          + (state.foils.length && c.foil === 0 ? " · passt nicht ins Raster einer Lochfolie" : "")],
         // die andere Anbauart mit ihrer Kulturdauer und, wenn sie abweichen, ihren Abständen
         [METHOD_LABEL[second.method], !c.alt ? null : (second.method === "transplant"
           ? `${second.nursery_days} Tage Anzucht, ${second.field_days} Tage im Beet bis zur Ernte`
@@ -244,6 +245,7 @@ export function bedFacts(b) {
     ["Art", KIND_LABEL[b.kind]],
     ["Größe", `${fmtNum(b.length, 2)} × ${fmtNum(b.width, 2)} m · ${fmtNum(b.length * b.width)} m²`],
     b.rotation ? ["Drehung", `${Math.round(b.rotation)}°`] : null,
+    foilById(b.foil_id) ? ["Folie", foilLabel(foilById(b.foil_id))] : null,
   ].filter(Boolean));
 }
 
@@ -298,7 +300,8 @@ export function openPlantingOverview(p0) {
       const crop = find.crop(p.crop_id);
       const bed = find.bed(p.bed_id);
       const ph = phases(p);
-      const sp = spacing(p, crop);
+      const sp = spacing(p, crop, bed);
+      const foil = foilOf(p, crop, bed);
       const names = isMixed(p) ? p.varieties.map((v) => v.name) : p.variety ? [p.variety] : [];
       const missing = names.filter((n) => n.trim() && !varietyOf(p.crop_id, n));
       const goal = p.goal_id ? (state.goals || []).find((g) => g.id === p.goal_id) : null;
@@ -318,7 +321,7 @@ export function openPlantingOverview(p0) {
           ["Pflanzen", isMixed(p)
             ? `${mixPlan(p, crop, bed).total} auf ${plantCount(p, crop, bed)} Plätzen in ${plural(rowCount(p, crop, bed), "Reihe", "Reihen")}`
             : `${plantCount(p, crop, bed)} in ${plural(rowCount(p, crop, bed), "Reihe", "Reihen")}`],
-          ["Abstände", `${sp.row} × ${sp.plant} cm`],
+          ["Abstände", `${sp.row} × ${sp.plant} cm${foil ? ` (${foil.name})` : ""}`],
         ]),
         missing.length ? h("p", { class: "small", style: { margin: 0 } },
           `${missing.join(", ")} ${missing.length === 1 ? "steht" : "stehen"} noch nicht in der Sortenliste. `,

@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
-from . import db, methods, weather
+from . import db, foils, methods, weather
 
 router = APIRouter()
 
@@ -176,20 +176,21 @@ def _layout(count: int, crop: dict, bed_width: Optional[float] = None) -> dict:
     return {"rows": 1, "len": round(per_row * ps / 100, 2), "span": round(rs / 100, 2), "count": per_row}
 
 
-def _strip(count: int, crop: dict, bed: dict) -> dict:
+def _strip(count: int, crop: dict, bed: dict, grids: Optional[dict] = None) -> dict:
     """Streifen über die ganze Beetbreite, gerade lang genug für so viele Pflanzen (gleich gerechnet wie die Karte).
     Die Reihen laufen in Beetrichtung; der Streifen ist mindestens einen Pflanzabstand lang
     (in einem Beet, das breiter als lang ist, einen Reihenabstand)."""
-    from .baserow import plant_count
-    rs, ps = crop["row_spacing"] or 30, crop["plant_spacing"] or 30
-    p = {"span": None, "offset": 0, "rows": None, "row_spacing": None, "plant_spacing": None, "varieties": None}
+    p = {"span": None, "offset": 0, "rows": None, "row_spacing": None, "plant_spacing": None}
+    probe = foils.layout({**p, "len": 1.0}, crop, bed, grids)  # Abstände: Raster der Folie auf dem Beet, sonst die Kultur
+    rs, ps = probe["row_spacing"], probe["plant_spacing"]
     longest = max(bed["length"], 1.0) * 4
     k = 1
     while True:
         length = round(k * STRIP_STEP, 2)
         along = bed["length"] >= bed["width"]
         if length * 100 + 0.5 >= (ps if along else rs):
-            n = plant_count({**p, "len": length}, crop, bed)
+            lay = foils.layout({**p, "len": length}, crop, bed, grids)
+            n = lay["rows"] * lay["per_row"]
             if n >= count or length >= longest:
                 return {"rows": None, "len": length, "span": None, "count": n}
         k += 1
@@ -211,7 +212,7 @@ def _monday(d: date) -> date:
 
 
 def successions(goal: dict, crop: dict, fd: Callable[[date, int, bool], Optional[int]],
-                bed_width: Optional[float] = None, bed: Optional[dict] = None) -> list[dict]:
+                bed_width: Optional[float] = None, bed: Optional[dict] = None, grids: Optional[dict] = None) -> list[dict]:
     """Die Sätze, die das Ziel braucht. Jeder Satz deckt die Tage bis zum nächsten ab; was in diesen
     Tagen geerntet werden soll (Menge der jeweiligen Kalenderwoche), bestimmt seine Pflanzenzahl.
     Mit Beet ist jeder Satz ein Streifen über die Beetbreite."""
@@ -231,7 +232,7 @@ def successions(goal: dict, crop: dict, fd: Callable[[date, int, bool], Optional
         demand = sum(per_week(hs + timedelta(days=k)) for k in range((last - hs).days + 1)) / 7  # was ein Satz liefern muss
         count = max(1, math.ceil(demand / (goal["yield_per_plant"] or 1) - 1e-9))
         if count not in layouts:
-            layouts[count] = _strip(count, crop, bed) if bed else _layout(count, crop, bed_width)
+            layouts[count] = _strip(count, crop, bed, grids) if bed else _layout(count, crop, bed_width)
         layout = layouts[count]
         base = crop["field_days"] or 0
         # Spätester Pflanz- bzw. Saattag, an dem die Kultur bis zum Erntebeginn fertig wird
@@ -353,7 +354,7 @@ def compute(conn, g: dict, fd) -> dict:
     crop = methods.for_method(dict(conn.execute("SELECT * FROM crops WHERE id = ?", (g["crop_id"],)).fetchone()), g.get("method") or None)
     width = db.uniform_width(conn)
     bed = _bed(conn, g.get("bed_id"))
-    items = successions(g, crop, fd, width, bed)
+    items = successions(g, crop, fd, width, bed, foils.by_id(conn))
     out = {"crop": crop, "bed": bed, "items": items, "block_start": None, "block_len": None, "unplaced": []}
     if bed:
         r = place(conn, g, bed, items, g.get("block_start"))

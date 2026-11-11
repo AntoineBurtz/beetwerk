@@ -4,6 +4,7 @@
 import { state, api, find, load, setDay, select } from "./store.js";
 import {
   h, s, fmtDay, dayNum, isoOf, isoWeek, plural, fmtNum, phases, yearOf, monthStarts, MONTHS_SHORT, mix, clamp, round2, METHOD_LABEL,
+  foilOf, foilLabel,
 } from "./util.js";
 import { toast, confirmDialog, icon } from "./ui.js";
 import { shell, field } from "./editor.js";
@@ -355,6 +356,7 @@ export function openGoalEditor(goal, { year, bed_id = null, crop_id = null, star
     const transplant = out.method === "transplant";
     const bed = find.bed(out.bed_id);
     const crop = find.crop(Number(cropSel.value));
+    const onFoil = crop && bed ? foilOf({}, crop, bed) : null; // Raster der Folie auf dem Beet, wenn die Kultur hineinpasst
     const own = isNew ? new Map() : new Map(goalPlantings(g).map((p) => [p.goal_seq, p]));
     const items = ok.map((x) => {
       const p = own.get(x.seq);
@@ -387,6 +389,8 @@ export function openGoalEditor(goal, { year, bed_id = null, crop_id = null, star
       crop && out.method !== crop.method ? h("p", { class: "muted small", style: { margin: 0 } },
         `${METHOD_LABEL[out.method]} statt ${METHOD_LABEL[crop.method]}: ${out.field_days} Tage im Beet bis zur Ernte`
         + `${out.estimated ? " (geschätzt – in der Kultur eintragbar)" : ""}.`) : null,
+      onFoil ? h("p", { class: "muted small", style: { margin: 0 } },
+        `Auf dem Beet liegt ${foilLabel(onFoil)}: Die Sätze rechnen mit diesem Raster statt mit den Abständen der Kultur.`) : null,
       skipped.length ? h("p", { class: "muted small", style: { margin: 0 } },
         `${plural(skipped.length, "Satz entfällt", "Sätze entfallen")}, weil in ${skipped.length === 1 ? "seinen" : "ihren"} Wochen nichts geerntet werden soll.`) : null,
       cold.length ? h("p", { class: "note-inline" }, `${plural(cold.length, "Erntetermin", "Erntetermine")} (${cold.map((x) => day(x.harvest_start)).join(", ")}) `
