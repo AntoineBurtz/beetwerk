@@ -229,7 +229,7 @@ def session():
 
 
 def init_db() -> None:
-    from . import feeding, goals, nursery
+    from . import feeding, goals, methods, nursery
     from .bonitur import seed_traits
     from .profile import migrate_legacy
     from .seed import guess_trait_groups, seed_crops
@@ -253,7 +253,9 @@ def init_db() -> None:
             guess_trait_groups(conn)
         seed_traits(conn)
         migrate_legacy(conn)
+        fresh = methods.init(conn)  # vor der Anzucht: wer vorgezogen werden kann, bekommt dort Gefäße
         nursery.init(conn)
+        nursery.assign_defaults(conn, fresh)
         goals.init(conn)
         feeding.init(conn)
 

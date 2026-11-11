@@ -150,6 +150,17 @@ Die Übersicht eines **Satzes** zeigt Ablauf (gesät, gepflanzt, geerntet), Beet
 
 **Richtwerte prüfen** (Knopf über der Liste) stellt deine Abstände und Düngestufen neben die Richtwerte, mit Quelle je Zeile. Übernommen wird nur, was du anhakst. Ein bestehender Garten behält bei einem Update seine Abstände; neu dazu kommen einmalig die Düngestufen und die Kräuter Dill, Koriander, Estragon, Schnittlauch, Kerbel, Bohnenkraut, Thymian, Oregano, Salbei und Minze, soweit es sie unter diesem Namen noch nicht gibt.
 
+### Direktsaat oder Voranzucht
+
+Jede Kultur hat eine **übliche Anbauart**. Viele gehen aber auf beide Arten – Kräuter wie Dill, Petersilie, Basilikum und Koriander, dazu Salat, Kohlrabi, Mangold, Rote Bete, Spinat, Bohnen, Erbsen, Gurke, Zucchini, Kürbis und Mais. Im Dialog der Kultur setzt du dafür den Haken **„auch als Direktsaat“** bzw. **„auch mit Voranzucht“**. Die andere Anbauart hat eigene Werte:
+
+- **Bis zur Ernte:** Bleibt das Feld leer, schätzt Beetwerk. Direktsaat statt Voranzucht: Tage im Beet plus Anzuchtdauer minus 7 Tage (die Pflanze muss nicht neu anwachsen). Voranzucht statt Direktsaat: Tage im Beet minus Anzuchtdauer plus 7 Tage, mindestens 14; ohne eingetragene Anzuchtdauer gelten 28 Tage. Kopfsalat mit 28 Tagen Anzucht und 42 Tagen im Beet steht direkt gesät also 63 Tage. Das ist eine Faustregel dieses Programms und kein Wert aus einer Quelle – trag deine eigenen Tage ein, sobald du sie kennst.
+- **Reihen- und Pflanzabstand:** leer heißt wie bei der üblichen Anbauart. Wer direkt dichter sät, trägt hier den engeren Abstand ein.
+
+Im **Satz** wählst du die Anbauart wie bisher. Termine, Belegung, Pflanzenzahl und Platzbedarf rechnen dann mit den Werten dieser Anbauart; darunter steht, womit gerechnet wird und ob der Wert geschätzt ist. Wechselst du die Anbauart, bleibt der Tag im Beet stehen und die übrigen Termine rechnen neu. Beim **satzweisen Anbau** gibt es das Feld „Anbau“ (wie üblich oder die andere Art). Eine direkt gesäte Kultur, die auch vorgezogen werden kann, bekommt die Anzucht-Einstellungen (Gefäß, Keimrate, Reserve) und taucht auf der Seite Anzucht auf, sobald ein Satz mit Voranzucht geplant ist.
+
+Bei einem Update wird die zweite Anbauart einmalig für diese Kulturen eingeschaltet, soweit es sie unter diesem Namen gibt: Salate, Endivie, Rucola, Spinat, Mangold, Kohlrabi, Grünkohl, Fenchel, Rote Bete, Zwiebel, Bohnen, Erbsen, Gurke, Zucchini, Kürbis, Mais, Petersilie, Basilikum, Dill, Koriander, Schnittlauch und Bohnenkraut. Bestehende Sätze ändern sich dadurch nicht. Du kannst den Haken je Kultur wieder entfernen.
+
 ### Sorten
 
 Unter **Kulturen → Sorten** steht die Sortenliste: Kultur, botanische Art, Typ, Saatgut (samenfest oder F1), Bezugsquelle, Beschreibung, Merkmale, Foto mit Bildquelle und Quellen. Ein Klick auf eine Sorte öffnet ihre Übersicht zum Lesen: Foto, Art, Typ, Saatgut, Bezugsquelle, Beschreibung, Merkmale mit Herkunft, die Sätze mit dieser Sorte, Quellen und Notizen. Ändern lässt sich erst nach „Bearbeiten“; nach dem Speichern oder Abbrechen geht es zurück zur Übersicht. „Aus Sätzen übernehmen“ legt alle Sorten an, die schon in deinen Sätzen stehen. Im Satz-Dialog schlägt Beetwerk die Sorten der gewählten Kultur vor.
@@ -211,7 +222,7 @@ Die Mengen sind Höchstmengen für einen durchschnittlichen Gartenboden. Vorfruc
 
 ## Anzucht
 
-Die Seite **Anzucht** rechnet aus der Beetplanung, was wann gesät werden muss. Grundlage sind alle Sätze mit „Anzucht und Pflanzung“: Die Pflanzenzahl kommt aus der Beetbelegung bzw. den Anzahlen im Mischsatz. Ändert sich die Planung, rechnet die Anzucht neu. Eine **Anzucht** fasst alles zusammen, was von einer Kultur und Sorte am selben Tag gesät wird.
+Die Seite **Anzucht** rechnet aus der Beetplanung, was wann gesät werden muss. Grundlage sind alle Sätze mit „Voranzucht und Pflanzung“: Die Pflanzenzahl kommt aus der Beetbelegung bzw. den Anzahlen im Mischsatz. Ändert sich die Planung, rechnet die Anzucht neu. Eine **Anzucht** fasst alles zusammen, was von einer Kultur und Sorte am selben Tag gesät wird.
 
 - **Rechnung:** Bedarf (Beete + Freunde) plus Reserve der Kultur (Standard 20 %) ergibt die Jungpflanzen. Daraus mit der Keimrate die Körner: bei Breitsaat in die Saatschale so viele, dass genug keimen; bei Zellen und Töpfen so viele Zellen, dass in genug davon mindestens ein Korn aufgeht (bei 2 Körnern je Zelle und 80 % Keimrate also 96 % der Zellen). Mehr als ein Korn je Zelle passt auch für Horste wie Basilikum.
 - **Wochenplan:** je Kalenderwoche Aussäen, Pikieren, Abhärten, Auspflanzen und Abgeben, zum Abhaken. „Gesät“ überträgt sich auf die Sätze (ein Mischsatz ist gesät, wenn alle seine Sorten gesät sind), Auspflanzen ist das Häkchen des Satzes, Abgeben setzt den Wunsch auf „abgeholt“. Beim Öffnen springt die Seite zur aktuellen Woche.
@@ -369,7 +380,7 @@ BEETWERK_DATA=./data uvicorn app.main:app --host 0.0.0.0 --port 8000
 ### Begriffe
 
 - **Satz**: eine Pflanzung einer Kultur und Sorte an einer Stelle, mit Aussaat, ggf. Pflanzung, Erntebeginn und Ernteende.
-- **Bis zur Ernte** (Kultur): Tage ab Pflanzung, bei Direktsaat ab Aussaat.
+- **Bis zur Ernte** (Kultur): Tage ab Pflanzung, bei Direktsaat ab Aussaat. Die andere Anbauart einer Kultur hat einen eigenen Wert (siehe „Direktsaat oder Voranzucht“).
 - **Breite leer** im Satz heißt: reicht bis zum Beetrand.
 - **Reihen leer** heißt: automatisch berechnet. Reihen laufen immer in Beetrichtung, also entlang der langen Beetseite (ein 1 × 20 m Beet mit 50 × 50 cm hat 2 Reihen à 40 Pflanzen) – auch bei einem Satz, der nur ein kurzes Stück über die Beetbreite belegt.
 - **Reihe und Platz** im Mischsatz werden ab der gewählten Startecke gezählt.

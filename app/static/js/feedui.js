@@ -1,5 +1,5 @@
 // Düngung in der Oberfläche: Anzeige je Satz, fällige Gaben, Felder für Kultur und Einstellungen, Richtwerte prüfen.
-import { state, find, patch, create, remove, api, select, emit } from "./store.js";
+import { state, find, patch, create, remove, api, select, emit, load } from "./store.js";
 import { h, fmtDay, fmtNum, isoOf, yearOf, todayNum, phases } from "./util.js";
 import { feedPlan, feedTasks, feedWhen, gramsText, chosenFertilizer, bedFeed, FEED_LEVELS, FEED_LABEL } from "./feed.js";
 import { shell, field } from "./editor.js";
@@ -278,6 +278,17 @@ export async function openReferenceCheck() {
           h("td", { class: "small muted" }, r.source))))))
       : h("p", {}, "Alle Kulturen, für die es Richtwerte gibt, stimmen mit ihnen überein."),
     unknown.length ? h("p", { class: "muted small", style: { margin: 0 } }, `Ohne Richtwert: ${unknown.join(", ")}.`) : null,
+    // Kräuter, die es in diesem Garten (noch) nicht gibt – etwa nach dem Einspielen einer älteren Sicherung
+    data.missing_herbs?.length ? h("p", { class: "small", style: { margin: 0 } },
+      `In der Kulturliste fehlen: ${data.missing_herbs.join(", ")}. `,
+      h("button", { type: "button", class: "btn btn-sm", onclick: async () => {
+        try {
+          const out = await api.post("/api/crops/herbs");
+          await load();
+          toast(out.added.length ? `Ergänzt: ${out.added.join(", ")}` : "Nichts zu ergänzen");
+          ui.dlg.close();
+        } catch (e) { ui.showError(e.message); }
+      } }, "Als Kulturen ergänzen")) : null,
     h("p", { class: "muted small", style: { margin: 0 } },
       "Quellen: Bayerische Gartenakademie (LWG), „Sä- und Pflanztermine auf einen Blick“ und Merkblätter 2202 und 2166; aid, „Gemüse, Obst & Co.“ (2017); "
       + "IGZ, Nmin-Sollwerte für Freilandgemüse (2015); LfL, Basisdaten 2025, Tabelle 9d."));

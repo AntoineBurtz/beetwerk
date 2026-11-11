@@ -107,10 +107,32 @@ export function spanOf(p, bed) {
   return bed ? Math.max(0.05, bed.width - (p.offset || 0)) : 1;
 }
 
+// Anbauart: Jede Kultur hat eine übliche (Direktsaat oder Voranzucht) und kann auch die andere haben.
+// cropFor liefert die Kultur mit Anzuchtdauer, Tagen im Beet und Abständen der gewünschten Anbauart.
+// Für die andere Anbauart gelten eigene Werte (alt_…), wo sie eingetragen sind; sonst dieselben Abstände
+// und eine geschätzte Kulturdauer (estimated) – gleiche Rechnung wie methods.py.
+const NURSERY_FALLBACK = 28, SHOCK_DAYS = 7;
+export function cropFor(crop, method) {
+  if (!crop) return crop;
+  if (!method || !crop.method || method === crop.method) return { ...crop, estimated: false };
+  const nursery = crop.nursery_days || NURSERY_FALLBACK;
+  const own = crop.alt_field_days || 0;
+  const days = method === "transplant"
+    ? own || Math.max(14, (crop.field_days || 0) - nursery + SHOCK_DAYS)
+    : own || (crop.field_days || 0) + Math.max(0, (crop.nursery_days || 0) - SHOCK_DAYS);
+  return { ...crop, method, nursery_days: method === "transplant" ? nursery : crop.nursery_days, field_days: days,
+    row_spacing: crop.alt_row_spacing || crop.row_spacing, plant_spacing: crop.alt_plant_spacing || crop.plant_spacing,
+    estimated: !own };
+}
+export const otherMethod = (method) => (method === "transplant" ? "direct" : "transplant");
+export const METHOD_LABEL = { direct: "Direktsaat", transplant: "Voranzucht" };
+
+// Abstände eines Satzes: seine eigenen, sonst die der Kultur in seiner Anbauart
 export function spacing(p, crop) {
+  const c = cropFor(crop, p.method);
   return {
-    row: p.row_spacing || crop?.row_spacing || 30,
-    plant: p.plant_spacing || crop?.plant_spacing || 30,
+    row: p.row_spacing || c?.row_spacing || 30,
+    plant: p.plant_spacing || c?.plant_spacing || 30,
   };
 }
 
@@ -232,7 +254,8 @@ export function rectOf(p, bed) {
 }
 
 // Termine aus den Kulturdaten ableiten. anchor = Tag, an dem die Fläche belegt wird.
-export function datesFromCrop(crop, anchor, method = crop.method) {
+export function datesFromCrop(base, anchor, method = base.method) {
+  const crop = cropFor(base, method);
   if (method === "transplant") {
     const plant = anchor;
     const sow = plant - (crop.nursery_days || 0);
@@ -347,10 +370,6 @@ export function s(tag, attrs = {}, ...children) {
     el.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
   return el;
-}
-
-export function escapeHtml(str) {
-  return String(str ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 
 export const KIND_LABEL = {

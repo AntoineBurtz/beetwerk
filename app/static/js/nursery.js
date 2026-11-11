@@ -1,7 +1,7 @@
 // Anzucht: Wochenplan, Anzuchten, Abgaben an Freunde, Plätze und Gefäße.
 // Gerechnet wird auf dem Server (/api/nursery) aus den Sätzen und den Wünschen der Freunde.
 import { state, api, find, create, patch, remove, subscribe, emit } from "./store.js";
-import { h, fmtDay, dayNum, isoOf, isoWeek, yearOf, plural, fmtNum, todayNum } from "./util.js";
+import { h, fmtDay, dayNum, isoOf, isoWeek, plural, fmtNum, todayNum } from "./util.js";
 import { toast, confirmDialog, icon, iconBtn, replaceKeepingFocus } from "./ui.js";
 import { shell, field, openCropEditor } from "./editor.js";
 import { openGoalEditor } from "./goals.js";
@@ -195,7 +195,7 @@ export function mountNursery(root) {
   function planView() {
     if (!plan.batches.length) {
       return h("div", { class: "empty-note" },
-        `Für ${year} gibt es noch keine Anzucht. Sie entsteht aus den Sätzen mit „Anzucht und Pflanzung“, aus dem satzweisen Anbau und aus den Wünschen deiner Freunde. `,
+        `Für ${year} gibt es noch keine Anzucht. Sie entsteht aus den Sätzen mit „Voranzucht und Pflanzung“, aus dem satzweisen Anbau und aus den Wünschen deiner Freunde. `,
         h("button", { type: "button", class: "link", onclick: () => openGoalEditor(null, { year }) }, "Satzweise anbauen"),
         plan.years.length ? h("div", { style: { marginTop: "8px" } }, "Anzucht gibt es in: ",
           plan.years.flatMap((y, i) => [i ? ", " : "", h("button", { type: "button", class: "link",
@@ -458,7 +458,7 @@ export function mountNursery(root) {
     const peopleList = h("datalist", { id: "people-list" }, state.people.map((p) => h("option", { value: p.name })));
     const cropSel = h("select", { required: true },
       h("option", { value: "", selected: !v.crop_id }, "– Kultur wählen –"),
-      [...state.crops].filter((c) => c.method === "transplant" || c.id === v.crop_id).sort((a, b) => a.name.localeCompare(b.name, "de"))
+      [...state.crops].filter((c) => c.method === "transplant" || c.alt || c.id === v.crop_id).sort((a, b) => a.name.localeCompare(b.name, "de"))
         .map((c) => h("option", { value: c.id, selected: c.id === v.crop_id }, c.name)));
     const varietyIn = h("input", { value: v.variety, list: "handover-varieties", autocomplete: "off", placeholder: "leer lassen, wenn egal" });
     const varList = h("datalist", { id: "handover-varieties" });
@@ -649,7 +649,7 @@ export function mountNursery(root) {
 
   function cropsSection() {
     const used = new Set(plan.batches.map((b) => b.crop_id));
-    const crops = state.crops.filter((c) => c.method === "transplant" || used.has(c.id))
+    const crops = state.crops.filter((c) => c.method === "transplant" || c.alt || used.has(c.id))
       .sort((a, b) => Number(used.has(b.id)) - Number(used.has(a.id)) || a.name.localeCompare(b.name, "de"));
     const rows = crops.map((c) => h("tr", { tabindex: "0", onclick: () => openCropOverview(c), onkeydown: (e) => { if (e.key === "Enter") openCropOverview(c); } },
       h("td", {}, h("div", { class: "crop-cell" }, h("span", { class: "dot", style: { background: c.color } }), c.name,

@@ -1,7 +1,7 @@
 // Sätze: Aufgaben rund um den Stichtag, alle Sätze des Jahres und der Bedarf an Pflanzen.
 import { state, find, patch, select, issuesOf, mark } from "./store.js";
 import {
-  h, phases, fmtDay, fmtNum, yearOf, yearStart, yearLength, mix, clamp, spanOf, plantCount, rowCount, area,
+  h, phases, fmtDay, fmtNum, yearOf, yearStart, mix, clamp, spanOf, plantCount, rowCount, area,
   isMixed, mixPlan, varietyText, varietyNames,
 } from "./util.js";
 import { openPlantingEditor } from "./editor.js";

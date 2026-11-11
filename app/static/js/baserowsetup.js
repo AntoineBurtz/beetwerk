@@ -63,7 +63,7 @@ export function statusChip(st, onClick) {
 
 // ---------------------------------------------------------------- Abschnitt in den Einstellungen
 
-export function baserowSection(closeSettings) {
+export function baserowSection() {
   const box = h("fieldset", {}, h("legend", {}, "Baserow"), h("p", { class: "muted small", style: { margin: 0 } }, "Lade …"));
   const paint = (st) => {
     const body = [h("legend", {}, "Baserow")];

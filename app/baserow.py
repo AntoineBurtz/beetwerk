@@ -24,7 +24,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from . import bonitur, db, profile
+from . import bonitur, db, methods, profile
 
 USER_AGENT = "Beetwerk (selbst gehostete Anbauplanung)"
 TIMEOUT = 30
@@ -695,8 +695,9 @@ def plant_count(p: dict, crop: dict, bed: Optional[dict]) -> int:
         mixed = bonitur._loads(p["varieties"], []) or []
         if mixed:
             return sum(int(v.get("count") or 0) for v in mixed)
-    row_sp = p["row_spacing"] or crop["row_spacing"] or 30
-    plant_sp = p["plant_spacing"] or crop["plant_spacing"] or 30
+    usual = methods.for_method(crop, p.get("method"))  # Abstände der Anbauart dieses Satzes
+    row_sp = p["row_spacing"] or usual["row_spacing"] or 30
+    plant_sp = p["plant_spacing"] or usual["plant_spacing"] or 30
     span = p["span"] if p["span"] is not None else (max(0.05, bed["width"] - (p["offset"] or 0)) if bed else 1)
     crosswise = bed is not None and bed["length"] < bed["width"]  # Beet breiter als lang: Reihen entlang der Breite
     long_m, short_m = (span, p["len"]) if crosswise else (p["len"], span)
