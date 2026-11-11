@@ -1599,3 +1599,19 @@ table.goal-table tr.cold td { color: var(--ink-3); }
   /* Übersichten übereinander: jede deckt die darunterliegende ganz ab */
   dialog.var-detail form { height: calc(100dvh - 24px); }
 }
+
+/* Düngung */
+.feed-block { display: grid; gap: 8px; }
+.feed-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.feed-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; }
+.feed-list li.done { color: var(--ink-3); }
+.feed-list li.done .feed-when b { text-decoration: line-through; font-weight: 500; }
+.feed-list .check { min-height: 32px; }
+.feed-amount { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
+.feed-list li.done .feed-amount { font-weight: 400; }
+.legend-list .when.overdue { color: var(--alert); font-weight: 600; }
+.feed-detail { display: grid; gap: 10px; }
+.fert-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.fert-list .chip { cursor: pointer; }
+.chip.chip-add { border-style: dashed; color: var(--ink-2); }
+dialog.wide { width: min(860px, calc(100vw - 24px)); }

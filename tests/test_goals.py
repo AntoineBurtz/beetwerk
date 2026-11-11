@@ -17,6 +17,10 @@ from app.main import app  # noqa: E402
 def client():
     with TestClient(app) as c:
         c.post("/api/demo?replace=true")
+        # die Rechnungen hier gehen von festen Abständen aus (Kopfsalat 30 x 30, Pflücksalat 30 x 25), unabhängig von den Richtwerten
+        for name, plant in (("Kopfsalat", 30), ("Pflücksalat", 25)):
+            crop = next(x for x in c.get("/api/data").json()["crops"] if x["name"] == name)
+            c.patch(f"/api/crops/{crop['id']}", json={"row_spacing": 30, "plant_spacing": plant})
         yield c
 
 

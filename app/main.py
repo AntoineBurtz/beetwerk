@@ -17,13 +17,14 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import baserow, bonitur, db, geo, goals, nursery, profile, research, varieties, weather
+from . import baserow, bonitur, db, feeding, geo, goals, nursery, profile, research, varieties, weather
 from .seed import guess_trait_groups, seed_demo
 
 VERSION = "1.1.0"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 IMAGE_PATH = db.DATA_DIR / "imagery" / "garden.jpg"
-INTERNAL_SETTINGS = {"geo", "imagery_custom", bonitur.SEEDED_KEY, profile.MIGRATED_KEY, nursery.SEEDED_KEY, *weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
+INTERNAL_SETTINGS = {"geo", "imagery_custom", bonitur.SEEDED_KEY, profile.MIGRATED_KEY, nursery.SEEDED_KEY,
+                     feeding.SEEDED_KEY, feeding.HERBS_KEY, *weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
 # Nicht in die Sicherung: Abrufzustand und Zugangsdaten
 NOT_EXPORTED = {*weather.STATE_KEYS, *baserow.KEYS, *research.KEYS}
 
@@ -125,6 +126,13 @@ class CropIn(BaseModel):
     harden_days: Optional[int] = Field(None, ge=0, le=60)
     place_id: Optional[int] = Field(None, ge=0)
     grow_place_id: Optional[int] = Field(None, ge=0)
+    # Düngung
+    feed: Optional[Literal["", "none", "low", "medium", "high"]] = None
+    feed_n: Optional[float] = Field(None, ge=0, le=60)       # eigene Menge in g N/m², 0 = Menge der Stufe
+    feed_cut: Optional[bool] = None
+    feed_start: Optional[int] = Field(None, ge=0, le=120)
+    feed_late: Optional[bool] = None
+    feed_src: Optional[str] = Field(None, max_length=60)
 
 
 class VarietyIn(BaseModel):
@@ -165,6 +173,8 @@ class PlantingIn(BaseModel):
     varieties: Optional[list[VarietyIn]] = Field(None, max_length=200)
     fill: Optional[Literal["snake", "columns"]] = None
     fill_start: Optional[Literal["tl", "tr", "bl", "br"]] = None
+    no_feed: Optional[bool] = None                           # diesen Satz nicht düngen
+    fed: Optional[dict[str, str]] = Field(None, max_length=20)  # erledigte Düngergaben: Nummer der Gabe -> Datum
 
     @field_validator("sow_date", "plant_date", "harvest_start", "harvest_end")
     @classmethod
@@ -191,6 +201,8 @@ class SettingsIn(BaseModel):
     bed_mode: Optional[Literal["uniform", "individual"]] = None
     bed_width: Optional[float] = Field(None, ge=0.2, le=10)
     beds_locked: Optional[Literal["0", "1"]] = None
+    fert_id: Optional[int] = Field(None, ge=1)
+    feed_factor: Optional[Literal["25", "50", "75", "100"]] = None
 
 
 class CustomSource(BaseModel):
@@ -228,11 +240,12 @@ class ImageIn(BaseModel):
 
 BED_DEFAULTS = dict(name="Neues Beet", kind="bed", x=1.0, y=1.0, length=4.0, width=1.2, rotation=0.0, sort=0, notes="")
 CROP_DEFAULTS = dict(name="Neue Kultur", family="", color="#6a9b3c", method="direct", nursery_days=0,
-                     field_days=60, harvest_days=21, row_spacing=30, plant_spacing=30, notes="", trait_group="")
+                     field_days=60, harvest_days=21, row_spacing=30, plant_spacing=30, notes="", trait_group="",
+                     feed="", feed_n=0, feed_cut=0, feed_start=0, feed_late=0, feed_src="")
 PLANTING_DEFAULTS = dict(variety="", bed_id=None, method="direct", plant_date=None, start=0.0, len=1.0,
                          offset=0.0, span=None, rows=None, row_spacing=None, plant_spacing=None,
                          sown_done=False, planted_done=False, harvest_done=False, notes="",
-                         varieties="", fill="snake", fill_start="tl")
+                         varieties="", fill="snake", fill_start="tl", no_feed=False, fed="")
 
 
 def _err(status: int, message: str):
@@ -269,6 +282,8 @@ def _encode_varieties(record: dict) -> dict:
     if "varieties" in record:
         v = record["varieties"]
         record["varieties"] = json.dumps(v, ensure_ascii=False, separators=(",", ":")) if v else ""
+    if "fed" in record and not isinstance(record["fed"], str):
+        record["fed"] = json.dumps(record["fed"], separators=(",", ":")) if record["fed"] else ""
     return record
 
 
@@ -278,6 +293,10 @@ def _planting_out(row: dict) -> dict:
         row["varieties"] = json.loads(raw) if raw else []
     except ValueError:
         row["varieties"] = []
+    try:
+        row["fed"] = json.loads(row["fed"]) if row.get("fed") else {}
+    except ValueError:
+        row["fed"] = {}
     return row
 
 
@@ -286,7 +305,7 @@ def _get_planting(conn, planting_id: int) -> dict:
 
 
 def _bool_flags(record: dict) -> dict:
-    for k in ("sown_done", "planted_done", "harvest_done"):
+    for k in ("sown_done", "planted_done", "harvest_done", "no_feed"):
         if k in record and record[k] is not None:
             record[k] = int(bool(record[k]))
     return record
@@ -365,6 +384,7 @@ def all_data():
             "varieties": [varieties.variety_out(v) for v in db.rows(conn, "SELECT * FROM varieties ORDER BY name COLLATE NOCASE")],
             **nursery.lists(conn),
             **goals.lists(conn),
+            **feeding.lists(conn),
         }
 
 
@@ -452,8 +472,9 @@ def delete_bed(bed_id: int):
 
 def _crop_refs(conn, record: dict) -> dict:
     """Gefäße und Plätze der Anzucht: 0 heißt keins, sonst muss es sie geben."""
-    if "warm" in record:
-        record["warm"] = int(bool(record["warm"]))
+    for k in ("warm", "feed_cut", "feed_late"):
+        if k in record:
+            record[k] = int(bool(record[k]))
     for k, table, what in (("sow_container_id", "containers", "Dieses Gefäß"), ("pot_container_id", "containers", "Dieses Gefäß"),
                            ("place_id", "places", "Diesen Anzuchtplatz"), ("grow_place_id", "places", "Diesen Anzuchtplatz")):
         if k in record:
@@ -638,7 +659,7 @@ async def import_all(request: Request):
             cols = {r["name"] for r in db.rows(conn, f"PRAGMA table_info({table})")}
             for item in data.get(table) or []:
                 record = {k: v for k, v in item.items() if k in cols}
-                if table == "plantings" and isinstance(record.get("varieties"), list):
+                if table == "plantings" and (isinstance(record.get("varieties"), list) or isinstance(record.get("fed"), dict)):
                     _encode_varieties(record)
                 if table == "varieties" and isinstance(record.get("links"), list):
                     record["links"] = json.dumps(record["links"], ensure_ascii=False) if record["links"] else ""
@@ -655,6 +676,7 @@ async def import_all(request: Request):
         bonitur.import_tables(conn, data)
         profile.migrate_legacy(conn)  # ältere Sicherung mit Wuchs, Fruchtfarbe und Reife als Freitext
         nursery.seed(conn)  # ältere Sicherung ohne Anzucht: Gefäße und Richtwerte
+        feeding.import_tables(conn, data)  # Düngerliste; ältere Sicherung ohne Düngung: Stufen nach dem Namen
         for key, value in {**db.DEFAULT_SETTINGS, **keep}.items():
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
     return all_data()
@@ -768,4 +790,5 @@ app.include_router(baserow.router)
 app.include_router(varieties.router)
 app.include_router(nursery.router)
 app.include_router(goals.router)
+app.include_router(feeding.router)
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

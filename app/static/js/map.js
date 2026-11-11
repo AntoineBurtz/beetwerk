@@ -16,6 +16,7 @@ import { cropLink, varietyLink, link, openGoalOverview } from "./overview.js";
 import { openGeoSetup } from "./geosetup.js";
 import { openBonitur } from "./bonitur.js";
 import { openGoalEditor, blockGoalOf, moveBlock } from "./goals.js";
+import { feedBlock, feedDueList } from "./feedui.js";
 
 const U = 100; // SVG-Einheiten pro Meter, also Zentimeter
 const PLAN_AHEAD = 400; // so viele Tage voraus zeigt die Karte, was als Nächstes auf einer freien Fläche geplant ist
@@ -1356,6 +1357,8 @@ export function mountMap(root) {
         list(nursery, (p) => `pflanzen ${fmtDay(phases(p).plant)}`)));
     }
     if (soon.length) out.push(section(h("h3", {}, "Aussaat in den nächsten 14 Tagen"), list(soon, (p) => fmtDay(phases(p).sow))));
+    const feeds = feedDueList(day);
+    if (feeds) out.push(section(h("h3", {}, "Düngen in den nächsten 14 Tagen"), feeds));
     out.push(cropSection(null));
     out.push(section(h("h3", {}, "Fläche anlegen"),
       h("p", { class: "muted small", style: { margin: 0 } }, "Art wählen und auf der Karte aufziehen. Das geht auch über das + unten rechts."),
@@ -1589,6 +1592,8 @@ export function mountMap(root) {
             title: "Reihe, Platz und Sorte als Tabelle (CSV)" }, "Pflanzplan herunterladen")),
         mixLegend(p, crop, bed)));
     }
+    const feed = feedBlock(p);
+    if (feed) out.push(section(h("h3", {}, "Düngung"), feed));
     return out;
   }
 

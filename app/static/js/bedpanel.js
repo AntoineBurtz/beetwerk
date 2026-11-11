@@ -4,6 +4,7 @@ import {
   h, phases, mix, clamp, fmtDay, fmtNum, yearOf, yearStart, yearLength, KIND_LABEL, PLANTABLE, varietyText,
 } from "./util.js";
 import { icon } from "./ui.js";
+import { bedFeedLine } from "./feedui.js";
 
 // Nur lesen: Name, Art, Größe, Notizen; geändert wird über „Bearbeiten“
 export function bedSummary(bed, { actions = [], onClose } = {}) {
@@ -42,8 +43,9 @@ export function bedUsage(bed, { onPlanting } = {}) {
   return [
     h("section", { class: "panel-section" }, h("h3", {}, `Belegung ${year}`),
       thisYear.length ? list(thisYear, year)
-        : h("p", { class: "muted small", style: { margin: 0 } }, fresh ? `${year} nichts geplant.` : "Noch nichts geplant.")),
-    fresh ? h("section", { class: "panel-section" }, h("h3", {}, `Belegung ${year + 1}`), list(nextYear, year + 1)) : null,
+        : h("p", { class: "muted small", style: { margin: 0 } }, fresh ? `${year} nichts geplant.` : "Noch nichts geplant."),
+      bedFeedLine(bed, year)),
+    fresh ? h("section", { class: "panel-section" }, h("h3", {}, `Belegung ${year + 1}`), list(nextYear, year + 1), bedFeedLine(bed, year + 1)) : null,
     h("section", { class: "panel-section" }, h("h3", {}, "Fruchtfolge"), rotationHistory(bed, year)),
   ].filter(Boolean);
 }

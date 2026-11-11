@@ -2,6 +2,9 @@
 
 Kulturdaten sind Richtwerte für Freiland in Süddeutschland. Sie lassen sich
 in der App unter „Kulturen“ anpassen.
+
+Abstände kommen beim Anlegen aus den Quellen in feeding.REFERENCE (LWG, aid), soweit die Kultur dort steht.
+Anzuchtdauer, Tage bis zur Ernte und Erntedauer sind Erfahrungswerte ohne einzelne Quelle.
 """
 import json
 import sqlite3
@@ -44,6 +47,17 @@ CROPS = [
     ("Feldsalat", "Baldriangewächse", "#4f7942", "direct", 0, 50, 110, 12, 5),
     ("Zuckermais", "Süßgräser", "#f4d35e", "transplant", 21, 80, 14, 70, 30),
     ("Basilikum", "Lippenblütler", "#3a7d44", "transplant", 42, 35, 80, 30, 25),
+    # Kräuter (Estragon und Minze werden meist als Pflanze gekauft oder geteilt; die Anzucht gilt für Saatgut)
+    ("Dill", "Doldenblütler", "#7fae5a", "direct", 0, 45, 40, 30, 30),
+    ("Koriander", "Doldenblütler", "#5c9e52", "direct", 0, 45, 30, 30, 15),
+    ("Kerbel", "Doldenblütler", "#93bf6a", "direct", 0, 40, 30, 10, 1),
+    ("Estragon", "Korbblütler", "#6f9a63", "transplant", 42, 45, 120, 30, 40),
+    ("Schnittlauch", "Lauchgewächse", "#4f9d69", "transplant", 42, 45, 180, 25, 20),
+    ("Bohnenkraut", "Lippenblütler", "#6b8f4e", "direct", 0, 50, 75, 25, 25),
+    ("Thymian", "Lippenblütler", "#8a9a5b", "transplant", 56, 60, 120, 20, 20),
+    ("Oregano", "Lippenblütler", "#7a8f3f", "transplant", 56, 50, 90, 20, 15),
+    ("Salbei", "Lippenblütler", "#9aa98b", "transplant", 42, 60, 150, 30, 40),
+    ("Minze", "Lippenblütler", "#4aa37a", "transplant", 42, 45, 120, 30, 30),
 ]
 
 
@@ -55,11 +69,17 @@ def guess_trait_groups(conn: sqlite3.Connection) -> None:
 
 
 def seed_crops(conn: sqlite3.Connection) -> None:
+    from .feeding import reference_for
+    rows = []
+    for row in CROPS:
+        ref = reference_for(row[0]) or {}
+        # Abstände aus den Quellen, wo es welche gibt
+        rows.append((*row[:7], ref.get("row_spacing") or row[7], ref.get("plant_spacing") or row[8]))
     conn.executemany(
         """INSERT INTO crops(name, family, color, method, nursery_days, field_days,
                              harvest_days, row_spacing, plant_spacing)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        CROPS,
+        rows,
     )
 
 

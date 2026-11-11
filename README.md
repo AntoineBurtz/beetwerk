@@ -13,7 +13,8 @@ Dazu gibt es:
 - Fruchtfolge-Prüfung: gleiche Pflanzenfamilie an gleicher Stelle innerhalb der Anbaupause (Standard 3 Jahre) wird orange markiert.
 - Aufgabenliste rund um den Stichtag (vorziehen, säen, auspflanzen, abräumen) zum Abhaken.
 - Bedarfsliste je Kultur und Sorte: Fläche, Reihenmeter, Pflanzen, vorzuziehende Jungpflanzen.
-- Kulturenliste mit 36 Gemüsen als Startwerte (Anzucht, Kulturdauer, Abstände, Familie), frei anpassbar.
+- Kulturenliste mit 46 Gemüsen und Kräutern als Startwerte (Anzucht, Kulturdauer, Abstände, Familie, Düngung), frei anpassbar; Abstände und Düngung mit Quelle.
+- Düngung: Stickstoffbedarf je Kultur nach der Bayerischen Gartenakademie, je Satz die Menge deines Düngers mit Terminen zum Abhaken.
 - Folgesätze mit einem Klick, Rückgängig (Strg+Z), JSON-Sicherung.
 - Mehrere Sätze markieren und gemeinsam verschieben, ändern oder löschen – in der Zeitleiste und in der Liste unter „Sätze“.
 - Gleich breite Beete: Beim Einrichten wählst du, ob alle Beete dieselbe Breite haben; dann steht die Breite fest und du ziehst nur noch die Länge.
@@ -145,6 +146,10 @@ Ein Klick auf eine Kultur öffnet ihre Übersicht: Anbau, Kulturdauer, Abstände
 
 Die Übersicht eines **Satzes** zeigt Ablauf (gesät, gepflanzt, geerntet), Beet, Fläche, Pflanzenzahl, die Sorte mit ihren Merkmalen, die Satzfolge, zu der er gehört, und Hinweise zur Fruchtfolge; dazu „Auf der Karte“, „Folgesatz“ und „Bonitieren“. Steht eine Sorte des Satzes noch nicht in der Sortenliste, lässt sie sich dort mit einem Klick aufnehmen. Die Übersicht eines **Beets** zeigt Art, Größe, Notizen, Belegung des Jahres und die Fruchtfolge der letzten Jahre.
 
+**Woher die Startwerte stammen.** Abstände kommen aus „Sä- und Pflanztermine auf einen Blick“ der Bayerischen Gartenakademie (LWG) und, wo eine Kultur dort fehlt, aus der Tabelle „Gemüse, Obst & Co.“ des aid (2017) – das gilt auch für die Kräuter. Anzuchtdauer, Tage bis zur Ernte und Erntedauer sind Erfahrungswerte ohne einzelne Quelle; sie hängen stark von Sorte, Jahreszeit und Wärme ab und sollten nach der ersten Saison an den eigenen Garten angepasst werden. Chili steht in den Quellen nicht und hat die Abstände von Paprika.
+
+**Richtwerte prüfen** (Knopf über der Liste) stellt deine Abstände und Düngestufen neben die Richtwerte, mit Quelle je Zeile. Übernommen wird nur, was du anhakst. Ein bestehender Garten behält bei einem Update seine Abstände; neu dazu kommen einmalig die Düngestufen und die Kräuter Dill, Koriander, Estragon, Schnittlauch, Kerbel, Bohnenkraut, Thymian, Oregano, Salbei und Minze, soweit es sie unter diesem Namen noch nicht gibt.
+
 ### Sorten
 
 Unter **Kulturen → Sorten** steht die Sortenliste: Kultur, botanische Art, Typ, Saatgut (samenfest oder F1), Bezugsquelle, Beschreibung, Merkmale, Foto mit Bildquelle und Quellen. Ein Klick auf eine Sorte öffnet ihre Übersicht zum Lesen: Foto, Art, Typ, Saatgut, Bezugsquelle, Beschreibung, Merkmale mit Herkunft, die Sätze mit dieser Sorte, Quellen und Notizen. Ändern lässt sich erst nach „Bearbeiten“; nach dem Speichern oder Abbrechen geht es zurück zur Übersicht. „Aus Sätzen übernehmen“ legt alle Sorten an, die schon in deinen Sätzen stehen. Im Satz-Dialog schlägt Beetwerk die Sorten der gewählten Kultur vor.
@@ -162,6 +167,47 @@ Die Karten der Sortenliste zeigen die wichtigsten Merkmale („Pflanze groß · 
 **Merkmale recherchieren (n)** über der Sortenliste geht alle Sorten ohne Merkmale nacheinander durch, im Hintergrund auf dem Server (etwa eine halbe Minute je Sorte, die Seite darf zu sein). Gefüllt werden nur leere Angaben: Merkmale, Art, Typ, Saatgut, Beschreibung und Quellen. Findet Claude eine Sorte nicht sicher, bleibt sie leer und steht im Ergebnis; dann hilft „Mit Claude ergänzen“ mit einem Hinweis wie dem Händler. Bilder wählst du bei jeder Sorte selbst.
 
 Dafür braucht es einen API-Schlüssel aus der [Claude Console](https://console.anthropic.com/), einzutragen unter Einstellungen → KI-Recherche. Der Schlüssel bleibt auf deinem Server und steht nicht in der Sicherung. Abgerechnet wird je Nutzung: die Websuche kostet 1 Cent je Suchanfrage (höchstens fünf je Sorte), dazu kommen die Tokens. Jede Recherche zeigt, wie viele Suchen und Tokens sie gebraucht hat. Der Server braucht dafür Internet.
+
+## Düngung
+
+Beetwerk rechnet je Satz aus, wie viel Stickstoffdünger er höchstens bekommt und wann. Phosphat, Kali und Kalk rechnet es nicht; dafür ist eine Bodenprobe der richtige Weg.
+
+**Woher die Zahlen stammen.** Grundlage ist das Merkblatt 2202 der Bayerischen Gartenakademie (LWG Veitshöchheim, Dezember 2020, „Hinweise zur praktischen Handhabung der Düngung im Gemüsegarten“). Es teilt Gemüse in drei Stufen und nennt Höchstmengen für Horndünger (50 / 100 / 150 g/m² bei knapp 13 % N) und Ammonsulfatsalpeter (25 / 50 / 75 g/m² bei 26 % N). Daraus ergeben sich je Kultur:
+
+| Stufe | Stickstoff | Kulturen laut Merkblatt |
+|---|---|---|
+| gering | 6,5 g/m² | Kopf- und Eissalat, Endivie, Feldsalat, Spinat, Radies, Rettich, Möhre, Rote Bete, Zwiebel, Erbse, Bohne, Gurke |
+| mittel | 13 g/m² | Tomate, Sellerie, Kohlrabi, Lauch, Blumenkohl, Brokkoli, Kopfkohl, Rosenkohl, Grünkohl, Chinakohl |
+| hoch | 19,5 g/m² | im Merkblatt ohne Kulturen; wählbar für eigene Erfahrungen |
+
+Kulturen, die das Merkblatt nicht nennt, sind eingestuft und im Dialog der Kultur so gekennzeichnet:
+
+- **abgeleitet** aus dem Stickstoffbedarfswert des Erwerbsanbaus (IGZ Großbeeren, Nmin-Sollwerte für Freilandgemüse, Stand 2015; LfL Bayern, Basisdaten 2025, Tabelle 9d für Gewürzpflanzen): bis 135 kg N/ha gering, darüber mittel. Das betrifft Zucchini, Kürbis, Zuckermais, Pastinake, Fenchel, Rucola, Pflücksalat, Knoblauch, Petersilie, Schnittlauch, Basilikum und Koriander. Die Grenze ist eine Festlegung von Beetwerk, keine Angabe der Quellen.
+- **Analogie** zur nächsten verwandten Kultur, weil keine Angabe zu finden war: Paprika, Chili und Aubergine (wie Tomate), Kartoffel, Mangold, Artischocke, Dicke Bohne.
+- **keine Stickstoffdüngung** für genügsame Kräuter nach dem LWG-Merkblatt 2166 („Kräuter zum Frischverzehr“, 2016): Dill, Estragon, Kerbel, Bohnenkraut, Thymian, Oregano, Salbei, Minze und andere. Ihnen genügt Kompost im Frühjahr, höchstens 3 l/m².
+
+**Termine** richten sich nach dem Dünger, den du in den Einstellungen wählst:
+
+| Dünger | gering | mittel | hoch |
+|---|---|---|---|
+| langsam (Horn, organisch, Langzeit) | alles zur Saat oder Pflanzung | alles zur Saat oder Pflanzung | die Hälfte zur Pflanzung, die Hälfte gut 3 Wochen später |
+| schnell (mineralisch) | alles 1 Woche nach der Pflanzung bzw. 2 Wochen nach der Saat | je die Hälfte zur Pflanzung und 3 Wochen später | je ein Drittel zur Pflanzung, nach 3 und nach 5 Wochen |
+
+Dazu kommen drei Regeln:
+
+- Langsam auflaufende Saaten (Möhre, Pastinake, Petersilie, Rote Bete: 4 Wochen; Zwiebel: 3 Wochen) bekommen schnell wirkenden Dünger erst dann – nach den Terminen des IGZ und des Merkblatts.
+- Feldsalat und Radieschen, die ab August beginnen, werden nicht gedüngt; laut Merkblatt entfällt das dann meist.
+- Schnittkulturen (Basilikum, Petersilie, Schnittlauch) bekommen die Hälfte zum Start und die andere Hälfte in bis zu drei Gaben nach den Schnitten, alle fünf Wochen ab Erntebeginn. Das Merkblatt sagt nur „regelmäßig nach jedem Schnitt“; die Abstände sind eine Näherung von Beetwerk.
+
+**Wo es steht.**
+
+- **Einstellungen → Düngung:** dein Stickstoffdünger aus einer Liste (Hornmehl, Hornspäne, Ammonsulfatsalpeter, Entec, Hornoska, Maltaflor – erweiterbar mit Namen, Stickstoffgehalt und Wirkung) und die Menge in Prozent. Humusreiche Böden liefern selbst Stickstoff nach: Laut Merkblatt genügen über 4 % Humus im Frühjahr 25 % der Menge. Der Gehalt von Hornspänen steht nicht im Merkblatt; die 13 % sind ein üblicher Wert, bitte nach der Packung eintragen.
+- **Kultur:** Stufe, eigene Menge in g N/m², Schnittkultur, Spätsommer-Regel und die Quelle der Einstufung.
+- **Satz** (Seitenleiste der Karte und Übersicht): Menge für seine Fläche und die Gaben mit Datum zum Abhaken. „Diesen Satz nicht düngen“ steht im Dialog des Satzes.
+- **Sätze → Aufgaben** und **Karte → Düngen in den nächsten 14 Tagen:** fällige und überfällige Gaben.
+- **Beetübersicht:** Stickstoff im Jahr, als Summe und je m² Beet.
+
+Die Mengen sind Höchstmengen für einen durchschnittlichen Gartenboden. Vorfrucht, Gründüngung, Mist und Nmin-Proben rechnet Beetwerk nicht an.
 
 ## Anzucht
 

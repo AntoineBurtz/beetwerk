@@ -11,6 +11,7 @@ import { openGeoSetup } from "./geosetup.js";
 import { baserowSection } from "./baserowsetup.js";
 import { researchSection } from "./researchsetup.js";
 import { openGoalEditor } from "./goals.js";
+import { cropFeedFields, feedSettings } from "./feedui.js";
 
 export function shell(title, { onSubmit, extraHead } = {}) {
   const dlg = h("dialog");
@@ -232,6 +233,7 @@ export function openPlantingEditor(planting, defaults = {}) {
   const sown = h("input", { type: "checkbox", name: "sown_done", checked: !!p.sown_done });
   const planted = h("input", { type: "checkbox", name: "planted_done", checked: !!p.planted_done });
   const harvested = h("input", { type: "checkbox", name: "harvest_done", checked: !!p.harvest_done });
+  const noFeed = h("input", { type: "checkbox", name: "no_feed", checked: !!p.no_feed });
   const plantedLabel = h("label", { class: "check" }, planted, "gepflanzt");
   const notes = h("textarea", { name: "notes" }, p.notes || "");
 
@@ -382,6 +384,7 @@ export function openPlantingEditor(planting, defaults = {}) {
       sown_done: sown.checked,
       planted_done: m === "transplant" ? planted.checked : false,
       harvest_done: harvested.checked,
+      no_feed: noFeed.checked,
       notes: notes.value,
     };
     if (isNew) {
@@ -455,6 +458,7 @@ export function openPlantingEditor(planting, defaults = {}) {
       h("div", { style: { display: "flex", gap: "18px", flexWrap: "wrap" } },
         h("label", { class: "check" }, sown, "gesät"), plantedLabel,
         h("label", { class: "check" }, harvested, "abgeräumt"))),
+    h("label", { class: "check" }, noFeed, "Diesen Satz nicht düngen"),
     field("Notizen", notes),
     issueList.length ? h("ul", { class: "issues" }, issueList.map((i) => h("li", { class: i.kind }, i.text))) : null,
   );
@@ -624,6 +628,8 @@ export function openCropEditor(crop) {
   potCont.addEventListener("change", paintNursery);
   paintNursery();
 
+  const feed = cropFeedFields(c);
+
   const ui = shell(isNew ? "Neue Kultur" : c.name, {
     onSubmit: async () => {
       const intOf = (el, label, min = 0) => {
@@ -643,6 +649,7 @@ export function openCropEditor(crop) {
         plant_spacing: intOf(plantSp, "Pflanzabstand", 1),
         notes: notes.value,
         trait_group: traitGroup.value,
+        ...feed.value(),
       };
       if (method.value === "transplant") {
         Object.assign(payload, {
@@ -673,6 +680,7 @@ export function openCropEditor(crop) {
       h("legend", {}, "Abstände in cm"),
       h("div", { class: "grid-2" }, field("Reihenabstand", rowSp), field("Pflanzabstand in der Reihe", plantSp))),
     nurseryBox,
+    feed.el,
     field("Bonitur-Merkmale", traitGroup, "Welche Merkmale die Bonitur für diese Kultur anbietet"),
     field("Notizen", notes),
   );
@@ -732,6 +740,7 @@ export function openSettings() {
     value: s.weather_lon ? fmtInput(Number(s.weather_lon)) : "" });
 
   const bedMode = bedModeControl();
+  const feeding = feedSettings();
   const ui = shell("Einstellungen", {
     onSubmit: async () => {
       const bm = bedMode.value();
@@ -742,6 +751,7 @@ export function openSettings() {
         weather_enabled: wxOn.checked ? "1" : "0",
         weather_soil: soilSel.value,
         weather_frost: frostSel.value,
+        ...feeding.value(),
       };
       if (!geo && (lat.value.trim() || lon.value.trim())) {
         const la = num(lat.value), lo = num(lon.value);
@@ -861,6 +871,7 @@ export function openSettings() {
         + "Gilt für Flächen der Art „Beet“; Hochbeete, Gewächshäuser und Wege behalten eigene Maße. "
         + "Die Pflanzreihen laufen in jedem Beet entlang der langen Seite, nie quer.")),
     weatherSection,
+    feeding.el,
     field("Anbaupause für die Fruchtfolge (Jahre)", years,
       "Gleiche Pflanzenfamilie an gleicher Stelle innerhalb dieser Zeit wird markiert. 0 schaltet die Prüfung ab."),
     baserowSection(() => ui.dlg.close()),

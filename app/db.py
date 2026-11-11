@@ -192,6 +192,7 @@ DEFAULT_SETTINGS = {
     "bed_mode": "individual",  # "uniform": alle Beete gleich breit, Reihen entlang der langen Seite
     "bed_width": "1.2",
     "beds_locked": "0",  # "1": Beete lassen sich auf der Karte nicht verschieben, Ziehen bewegt den Ausschnitt
+    "feed_factor": "100",  # Düngung in % der Empfehlung (humusreicher Boden braucht weniger)
 }
 
 
@@ -228,7 +229,7 @@ def session():
 
 
 def init_db() -> None:
-    from . import goals, nursery
+    from . import feeding, goals, nursery
     from .bonitur import seed_traits
     from .profile import migrate_legacy
     from .seed import guess_trait_groups, seed_crops
@@ -254,6 +255,7 @@ def init_db() -> None:
         migrate_legacy(conn)
         nursery.init(conn)
         goals.init(conn)
+        feeding.init(conn)
 
 
 # Spalten, die nach der ersten Version dazugekommen sind
